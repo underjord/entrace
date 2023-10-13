@@ -9,11 +9,11 @@ defmodule Entrace.Application do
   def start(_type, _args) do
     children = [
       # Start the Telemetry supervisor
-      EntraceWeb.Telemetry,
+      # EntraceWeb.Telemetry,
       # Start the PubSub system
-      {Phoenix.PubSub, name: Entrace.PubSub},
+      # {Phoenix.PubSub, name: Entrace.PubSub},
       # Start the Endpoint (http/https)
-      EntraceWeb.Endpoint
+      # EntraceWeb.Endpoint
       # Start a worker by calling: Entrace.Worker.start_link(arg)
       # {Entrace.Worker, arg}
     ]

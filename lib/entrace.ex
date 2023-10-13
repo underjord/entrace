@@ -2,6 +2,8 @@ defmodule Entrace do
   use GenServer
   import Ex2ms
   require Logger
+  alias Entrace.Trace
+  alias Entrace.State
 
   def start_link(opts) do
     {mfa, opts} = Keyword.pop(opts, :mfa)
@@ -12,11 +14,10 @@ defmodule Entrace do
     Entrace.start_link(mfa: mfa)
   end
 
+  @spec stop(atom() | pid()) :: list(Trace.t())
   def stop(pid) do
     GenServer.call(pid, :stop)
   end
-
-  def wildcard, do: :_
 
   @impl GenServer
   def init(mfa) do
@@ -25,7 +26,8 @@ defmodule Entrace do
 
     state = %{
       mfa: mfa,
-      traces: [],
+      unmatched_traces: %{},
+      matched_traces: [],
       ref: mon_ref
     }
 
@@ -44,29 +46,30 @@ defmodule Entrace do
     Logger.debug("Receiving call event from #{inspect(from_pid)} for #{inspect(mfa)}.")
     datetime = ts_to_dt!(ts)
 
-    trace = %{
-      type: :call,
-      pid: from_pid,
-      datetime: datetime,
-      mfa: mfa
-    }
+    trace = Trace.new(mfa, from_pid, datetime)
+    key = {from_pid, call_mfa_to_key(mfa)}
+    unmatched = Map.put(state.unmatched_traces, key, trace)
 
-    {:noreply, %{state | traces: [trace | state.traces]}}
+    {:noreply, %{state | unmatched_traces: unmatched}}
   end
 
   def handle_info({:trace_ts, from_pid, :return_from, mfa, return, ts}, state) do
     Logger.debug("Receiving return_from event from #{inspect(from_pid)} for #{inspect(mfa)}.")
     datetime = ts_to_dt!(ts)
+    key = {from_pid, mfa}
 
-    trace = %{
-      type: :return,
-      pid: from_pid,
-      datetime: datetime,
-      mfa: mfa,
-      return: return
-    }
+    {unmatched, matched} =
+      case Map.pop(state.unmatched_traces, key) do
+        {nil, unmatched} ->
+          Logger.error("Got return trace but found no unmatched call.")
+          {unmatched, state.matched_traces}
 
-    {:noreply, %{state | traces: [trace | state.traces]}}
+        {trace, unmatched} ->
+          {unmatched,
+           [Trace.with_return(trace, mfa, from_pid, datetime, return) | state.matched_traces]}
+      end
+
+    {:noreply, %{state | matched_traces: matched, unmatched_traces: unmatched}}
   end
 
   def handle_info({:DOWN, ref, :process, _object, _reason}, %{ref: ref} = state) do
@@ -83,7 +86,12 @@ defmodule Entrace do
   @impl GenServer
   def handle_call(:stop, _from, state) do
     Logger.debug("shutting down and disabling traces")
-    {:stop, :normal, state.traces, state}
+
+    traces =
+      (state.matched_traces ++ Map.values(state.unmatched_traces))
+      |> Enum.sort_by(& &1.called_at, {:asc, DateTime})
+
+    {:stop, :normal, traces, state}
   end
 
   defp on(pid) do
@@ -114,6 +122,10 @@ defmodule Entrace do
     |> add(seconds_to_micro(seconds))
     |> add(megaseconds_to_micro(megaseconds))
     |> DateTime.from_unix!(:microsecond)
+  end
+
+  defp call_mfa_to_key({m, f, a}) when is_list(a) do
+    {m, f, Enum.count(a)}
   end
 
   defp add(a, b), do: a + b
