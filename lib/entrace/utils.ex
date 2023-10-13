@@ -61,6 +61,15 @@ defmodule Entrace.Utils do
       |> String.contains?(chars)
     end)
     |> Enum.sort_by(&String.length/1, :asc)
+    |> Enum.map(fn module ->
+      case module do
+        "Elixir." <> trimmed ->
+          {module, trimmed}
+
+        module ->
+          {module, module}
+      end
+    end)
   end
 
   def trim_elixir_namespace(modules) do
@@ -75,5 +84,11 @@ defmodule Entrace.Utils do
       end
     end)
     |> Enum.sort_by(&String.length/1, :asc)
+  end
+
+  def list_functions_for_module(module) when is_binary(module) do
+    module_atom = String.to_existing_atom(module)
+
+    apply(module_atom, :module_info, [:exports])
   end
 end
