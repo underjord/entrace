@@ -1,5 +1,6 @@
 defmodule Entrace.Trace do
-  defstruct mfa: nil,
+  defstruct id: nil,
+            mfa: nil,
             pid: nil,
             called_at: nil,
             returned_at: nil,
@@ -8,6 +9,7 @@ defmodule Entrace.Trace do
   alias Entrace.Trace
 
   @type t :: %Trace{
+          id: integer(),
           mfa: {atom(), atom(), atom() | non_neg_integer()},
           pid: pid(),
           called_at: DateTime.t(),
@@ -15,9 +17,9 @@ defmodule Entrace.Trace do
           return_value: nil | :too_large | {:return, term()}
         }
 
-  def new({m, f, a} = mfa, pid, %DateTime{} = called_at)
+  def new(id, {m, f, a} = mfa, pid, %DateTime{} = called_at)
       when is_atom(m) and is_atom(f) and (is_atom(a) or a >= 0) and is_pid(pid) do
-    %Trace{mfa: mfa, pid: pid, called_at: called_at}
+    %Trace{id: id, mfa: mfa, pid: pid, called_at: called_at}
   end
 
   def with_return(

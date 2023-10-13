@@ -3,15 +3,13 @@ defmodule Entrace do
   import Ex2ms
   require Logger
   alias Entrace.Trace
-  alias Entrace.State
 
-  def start_link(opts) do
-    {mfa, opts} = Keyword.pop(opts, :mfa)
-    GenServer.start_link(__MODULE__, mfa, opts)
+  def start_link(mfa, callback) do
+    GenServer.start_link(__MODULE__, %{mfa: mfa, callback: callback}, [])
   end
 
-  def trace(mfa) do
-    Entrace.start_link(mfa: mfa)
+  def trace(mfa, callback \\ nil) do
+    Entrace.start_link(mfa, callback)
   end
 
   @spec stop(atom() | pid()) :: list(Trace.t())
@@ -20,15 +18,16 @@ defmodule Entrace do
   end
 
   @impl GenServer
-  def init(mfa) do
+  def init(config) do
     Logger.debug("Starting Entrace GenServer...")
     mon_ref = Process.monitor(self())
 
     state = %{
-      mfa: mfa,
+      mfa: config.mfa,
       unmatched_traces: %{},
       matched_traces: [],
-      ref: mon_ref
+      ref: mon_ref,
+      callback: config.callback
     }
 
     Logger.debug("Enabling tracing...")
@@ -45,8 +44,12 @@ defmodule Entrace do
   def handle_info({:trace_ts, from_pid, :call, mfa, ts}, state) do
     Logger.debug("Receiving call event from #{inspect(from_pid)} for #{inspect(mfa)}.")
     datetime = ts_to_dt!(ts)
+    id = System.unique_integer([:positive, :monotonic])
 
-    trace = Trace.new(mfa, from_pid, datetime)
+    trace = Trace.new(id, mfa, from_pid, datetime)
+
+    if state.callback, do: state.callback.(trace)
+
     key = {from_pid, call_mfa_to_key(mfa)}
     unmatched = Map.put(state.unmatched_traces, key, trace)
 
@@ -65,8 +68,9 @@ defmodule Entrace do
           {unmatched, state.matched_traces}
 
         {trace, unmatched} ->
-          {unmatched,
-           [Trace.with_return(trace, mfa, from_pid, datetime, return) | state.matched_traces]}
+          trace = Trace.with_return(trace, mfa, from_pid, datetime, return)
+          if state.callback, do: state.callback.(trace)
+          {unmatched, [trace | state.matched_traces]}
       end
 
     {:noreply, %{state | matched_traces: matched, unmatched_traces: unmatched}}

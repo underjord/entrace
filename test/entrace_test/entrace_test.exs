@@ -18,6 +18,23 @@ defmodule Entrace.EntraceTest do
     assert [%Trace{mfa: {:queue, :new, []}}] = traces
   end
 
+  test "trace with callback" do
+    home = self()
+
+    {:ok, pid} =
+      Entrace.trace({:queue, :new, 0}, fn trace ->
+        send(home, {:trace, trace})
+      end)
+
+    :queue.new()
+
+    assert_receive {:trace, %Trace{returned_at: nil}}
+    assert_receive {:trace, %Trace{returned_at: %DateTime{}}}
+
+    traces = Entrace.stop(pid)
+    assert [%Trace{mfa: {:queue, :new, []}}] = traces
+  end
+
   test "trace all NaiveDateTime functions" do
     {:ok, trace_pid} = Entrace.trace({NaiveDateTime, :_, :_})
 
