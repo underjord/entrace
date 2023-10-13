@@ -44,12 +44,13 @@ defmodule Entrace.EntraceTest do
 
     pid = self()
 
+    # Filter the traces because occasionally the system uses NaiveDateTime
     assert [
              %{mfa: {NaiveDateTime, :utc_now, []}},
              %{mfa: {NaiveDateTime, :utc_now, [Calendar.ISO]}},
              %{mfa: {NaiveDateTime, :add, [_, 1, :second]}},
              %{mfa: {NaiveDateTime, :to_iso_days, [_]}},
              %{mfa: {NaiveDateTime, :from_iso_days, [{_, {_, _}}, Calendar.ISO, 6]}}
-           ] = traces
+           ] = traces |> Enum.filter(fn trace -> trace.pid == pid end)
   end
 end
