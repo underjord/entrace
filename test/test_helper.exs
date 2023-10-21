@@ -1,2 +1,2 @@
 ExUnit.start()
-Logger.configure(level: :debug)
+# Logger.configure(level: :debug)

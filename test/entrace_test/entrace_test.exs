@@ -1,119 +1,172 @@
 defmodule Entrace.EntraceTest do
-  use ExUnit.Case, async: true
+  # While separate function trace patterns can be run in parallel
+  # it is very messy to try and test the `use Entrace.Tracer` approach
+  # at the same time
+  use ExUnit.Case, async: false
 
-  alias Entrace.Tracer
   alias Entrace.Trace
 
-  defmodule Sample do
-    def hold(time) do
-      :timer.sleep(time)
+  describe "basic" do
+    defmodule Sample do
+      def hold(time) do
+        :timer.sleep(time)
+      end
+
+      def a, do: :ok
+      def b, do: :ok
     end
 
-    def a, do: :ok
-  end
+    setup do
+      {:ok, pid} = Entrace.start_link()
 
-  setup_all do
-    {:ok, pid} = Entrace.start_link()
-    {:ok, pid: pid}
-  end
+      on_exit(fn ->
+        Entrace.exit(pid)
+      end)
 
-  test "trace :queue.new/0", %{pid: pid} do
-    mfa = {:queue, :new, 0}
-    assert {:ok, {:set, 1}} = Entrace.trace(pid, mfa, self())
+      {:ok, pid: pid}
+    end
 
-    :queue.new()
+    test "trace :queue.new/0", %{pid: pid} do
+      mfa = {Sample, :a, 0}
 
-    Entrace.stop(pid, mfa)
-    assert_receive {:trace, %Trace{mfa: {:queue, :new, []}, return_value: nil}}
-    assert_receive {:trace, %Trace{mfa: {:queue, :new, []}, return_value: {:return, {[], []}}}}
-  end
-
-  test "two concurrent traces", %{pid: pid} do
-    Task.start(fn ->
-      mfa = {:maps, :new, 0}
       assert {:ok, {:set, 1}} = Entrace.trace(pid, mfa, self())
 
-      :maps.new()
+      assert :ok = Sample.a()
 
-      Entrace.stop(pid, mfa)
-      assert_receive {:trace, %Trace{mfa: {:maps, :new, []}, return_value: nil}}
+      assert_receive {:trace, %Trace{mfa: {Sample, :a, []}, return_value: nil}}
+      assert_receive {:trace, %Trace{mfa: {Sample, :a, []}, return_value: {:return, :ok}}}
+    end
 
-      assert_receive {:trace, %Trace{mfa: {:maps, :new, []}, return_value: {:return, %{}}}}
-    end)
+    test "two concurrent interleaved traces", %{pid: pid} do
+      base = self()
 
-    Task.start(fn ->
-      mfa = {:queue, :is_queue, 1}
-      assert {:ok, {:set, 1}} = Entrace.trace(pid, mfa, self())
+      # mfa1 = {:maps, :new, :_}
+      mfa1 = {Sample, :a, 0}
+      assert {:ok, {:set, 1}} = Entrace.trace(pid, mfa1, base)
 
-      :queue.is_queue(:foo)
+      # mfa2 = {:queue, :new, 0}
+      mfa2 = {Sample, :b, 0}
+      assert {:ok, {:set, 1}} = Entrace.trace(pid, mfa2, base)
 
-      Entrace.stop(pid, mfa)
-      assert_receive {:trace, %Trace{mfa: {:queue, :is_queue, []}, return_value: nil}}
+      assert :ok = Sample.a()
+      assert :ok = Sample.b()
+      ref = :erlang.trace_delivered(base)
+
+      receive do
+        {:trace_delivered, ^base, ^ref} ->
+          assert_receive {:trace, %Trace{mfa: {Sample, :a, []}, return_value: nil}}
+          assert_receive {:trace, %Trace{mfa: {Sample, :a, []}, return_value: {:return, :ok}}}
+          assert_receive {:trace, %Trace{mfa: {Sample, :b, []}, return_value: nil}}
+          assert_receive {:trace, %Trace{mfa: {Sample, :b, []}, return_value: {:return, :ok}}}
+      end
+    end
+
+    test "two parallel traces", %{pid: pid} do
+      base = self()
+
+      Task.start(fn ->
+        mfa = {Sample, :a, 0}
+        assert {:ok, {:set, 1}} = Entrace.trace(pid, mfa, base)
+
+        Sample.a()
+      end)
+
+      Task.start(fn ->
+        mfa = {Sample, :b, 0}
+        assert {:ok, {:set, 1}} = Entrace.trace(pid, mfa, base)
+
+        Sample.b()
+      end)
+
+      assert_receive {:trace, %Trace{mfa: {Sample, :a, []}, return_value: nil}}
+      assert_receive {:trace, %Trace{mfa: {Sample, :a, []}, return_value: {:return, :ok}}}
+      assert_receive {:trace, %Trace{mfa: {Sample, :b, []}, return_value: nil}}
+      assert_receive {:trace, %Trace{mfa: {Sample, :b, []}, return_value: {:return, :ok}}}
+    end
+
+    test "trace with callback", %{pid: pid} do
+      home = self()
+      q1 = :queue.new()
+      q2 = :queue.in(1, q1)
+      mfa = {:queue, :drop, 1}
+
+      assert {:ok, {:set, 1}} =
+               Entrace.trace(pid, mfa, fn trace ->
+                 send(home, {:boop, trace})
+               end)
+
+      assert ^q1 = :queue.drop(q2)
+
+      assert_receive {:boop,
+                      %Trace{mfa: {:queue, :drop, [^q2]}, returned_at: nil, return_value: nil}}
+
+      assert_receive {:boop,
+                      %Trace{
+                        mfa: {:queue, :drop, [^q2]},
+                        returned_at: %DateTime{},
+                        return_value: {:return, ^q1}
+                      }}
+    end
+
+    test "trace all NaiveDateTime functions", %{pid: pid} do
+      pattern = {NaiveDateTime, :_, :_}
+      assert {:ok, {:set, matches}} = Entrace.trace(pid, pattern, self())
+      # Expected 51 but we don't need our test to confirm the shape of the API
+      assert matches > 40 and matches < 100
+
+      assert %NaiveDateTime{} = NaiveDateTime.utc_now() |> NaiveDateTime.add(1, :second)
+
+      # Filter the traces because occasionally the system uses NaiveDateTime
+      assert_receive {:trace, %{mfa: {NaiveDateTime, :utc_now, []}}}
+      assert_receive {:trace, %{mfa: {NaiveDateTime, :utc_now, [Calendar.ISO]}}}
+      assert_receive {:trace, %{mfa: {NaiveDateTime, :add, [_, 1, :second]}}}
+      assert_receive {:trace, %{mfa: {NaiveDateTime, :to_iso_days, [_]}}}
 
       assert_receive {:trace,
-                      %Trace{mfa: {:queue, :is_queue, []}, return_value: {:return, false}}}
-    end)
+                      %{mfa: {NaiveDateTime, :from_iso_days, [{_, {_, _}}, Calendar.ISO, 6]}}}
+    end
+
+    test "trace to default limit", %{pid: pid} do
+      pattern = {Sample, :a, 0}
+      assert {:ok, {:set, 1}} = Entrace.trace(pid, pattern, self())
+
+      Enum.each(1..200, fn _ ->
+        Sample.a()
+      end)
+
+      Entrace.stop(pid, pattern)
+      {:messages, msgs} = :erlang.process_info(self(), :messages)
+
+      assert Enum.count(msgs) < 102
+    end
   end
 
-  test "trace with callback", %{pid: pid} do
-    home = self()
-    q1 = :queue.new()
-    q2 = :queue.in(1, q1)
-    mfa = {:queue, :drop, 1}
+  describe "using" do
+    defmodule MyTracer do
+      use Entrace.Tracer
+    end
 
-    assert {:ok, {:set, 1}} =
-             Entrace.trace(pid, mfa, fn trace ->
-               send(home, {:boop, trace})
-             end)
+    defmodule TSample do
+      def a, do: :ok
+    end
 
-    assert ^q1 = :queue.drop(q2)
+    setup do
+      {:ok, pid} = Supervisor.start_link([MyTracer], strategy: :one_for_one)
 
-    assert_receive {:boop,
-                    %Trace{mfa: {:queue, :drop, [^q2]}, returned_at: nil, return_value: nil}}
+      on_exit(fn ->
+        Process.exit(pid, :normal)
+      end)
 
-    assert_receive {:boop,
-                    %Trace{
-                      mfa: {:queue, :drop, [^q2]},
-                      returned_at: %DateTime{},
-                      return_value: {:return, ^q1}
-                    }}
+      {:ok, %{pid: pid}}
+    end
 
-    Entrace.stop(pid, mfa)
-  end
-
-  test "trace all NaiveDateTime functions", %{pid: pid} do
-    pattern = {NaiveDateTime, :_, :_}
-    assert {:ok, {:set, matches}} = Entrace.trace(pid, pattern, self())
-    # Expected 51 but we don't need our test to confirm the shape of the API
-    assert matches > 40 and matches < 100
-
-    assert %NaiveDateTime{} = NaiveDateTime.utc_now() |> NaiveDateTime.add(1, :second)
-
-    traces = Entrace.stop(pid, pattern)
-
-    pid = self()
-
-    # Filter the traces because occasionally the system uses NaiveDateTime
-    assert_receive {:trace, %{mfa: {NaiveDateTime, :utc_now, []}}}
-    assert_receive {:trace, %{mfa: {NaiveDateTime, :utc_now, [Calendar.ISO]}}}
-    assert_receive {:trace, %{mfa: {NaiveDateTime, :add, [_, 1, :second]}}}
-    assert_receive {:trace, %{mfa: {NaiveDateTime, :to_iso_days, [_]}}}
-
-    assert_receive {:trace,
-                    %{mfa: {NaiveDateTime, :from_iso_days, [{_, {_, _}}, Calendar.ISO, 6]}}}
-  end
-
-  test "trace to default limit", %{pid: pid} do
-    pattern = {Sample, :a, 0}
-    assert {:ok, {:set, 1}} = Entrace.trace(pid, pattern, self())
-
-    Enum.each(1..200, fn _ ->
-      Sample.a()
-    end)
-
-    Entrace.stop(pid, pattern)
-    {:messages, msgs} = :erlang.process_info(self(), :messages)
-
-    assert Enum.count(msgs) < 102
+    test "trace using MyTracer" do
+      pattern = {TSample, :a, 0}
+      MyTracer.trace(pattern, self())
+      TSample.a()
+      MyTracer.stop(pattern)
+      assert_receive {:trace, %{return_value: nil}}
+      assert_receive {:trace, %{return_value: {:return, :ok}}}
+    end
   end
 end

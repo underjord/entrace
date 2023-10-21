@@ -1,4 +1,26 @@
 defmodule Entrace do
+  @moduledoc """
+  Base module for starting a GenServer that performs tracing.
+
+  Typically you would rather add a module to your project that uses the `Entrace.Tracer`.
+
+  ```elixir
+  defmodule MyApp.Tracer do
+    use Entrace.Tracer
+  end
+  ```
+
+  And in your application.ex list och children to supervise add:application
+
+  ```
+  MyApp.Tracer
+  ```
+
+  It will run as locally registered on it's module name (in this case `MyApp.Tracer`).
+
+  It is not useful to run multiple Tracer instances as the Erlang tracing facility has a limit on the numer of traces.
+
+  """
   use GenServer
   import Ex2ms
   require Logger
@@ -34,6 +56,10 @@ defmodule Entrace do
   def stop(tracer, {m, f, a} = mfa)
       when is_atom(m) and is_atom(f) and (is_integer(a) or a == :_) do
     do_stop(tracer, mfa)
+  end
+
+  def exit(pid) do
+    Process.exit(pid, :user_halt)
   end
 
   defp do_trace(tracer, mfa, transmission, limit) do
@@ -224,6 +250,7 @@ defmodule Entrace do
   end
 
   defp clear_pattern(mfa) do
+    Logger.debug("Clearing pattern #{inspect(mfa)}")
     :erlang.trace_pattern(mfa, false, [:local])
   end
 
