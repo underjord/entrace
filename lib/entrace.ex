@@ -3,63 +3,100 @@ defmodule Entrace do
   import Ex2ms
   require Logger
   alias Entrace.Trace
+  alias Entrace.TracePatterns
 
-  def start_link(mfa, callback) do
-    GenServer.start_link(__MODULE__, %{mfa: mfa, callback: callback}, [])
+  def start_link(opts \\ []) do
+    GenServer.start_link(__MODULE__, nil, opts)
   end
 
-  def trace(mfa, callback \\ nil) do
-    Entrace.start_link(mfa, callback)
+  @default_limit 100
+  def trace(tracer, mfa, callback, opts \\ [])
+
+  def trace(tracer, {m, f, a} = mfa, callback, opts)
+      when is_atom(m) and is_atom(f) and (is_integer(a) or a == :_) and is_function(callback) do
+    limit = opts[:limit] || @default_limit
+    do_trace(tracer, mfa, callback, limit)
   end
 
-  @spec stop(atom() | pid()) :: list(Trace.t())
-  def stop(pid) do
-    GenServer.call(pid, :stop)
+  def trace(tracer, {m, f, a} = mfa, {m2, f2, 1} = callback_mfa, opts)
+      when is_atom(m) and is_atom(f) and (is_integer(a) or a == :_) and is_atom(m2) and
+             is_atom(f2) do
+    limit = opts[:limit] || @default_limit
+    do_trace(tracer, mfa, callback_mfa, limit)
+  end
+
+  def trace(tracer, {m, f, a} = mfa, recipient_pid, opts)
+      when is_atom(m) and is_atom(f) and (is_integer(a) or a == :_) and is_pid(recipient_pid) do
+    limit = opts[:limit] || @default_limit
+    do_trace(tracer, mfa, recipient_pid, limit)
+  end
+
+  def stop(tracer, {m, f, a} = mfa)
+      when is_atom(m) and is_atom(f) and (is_integer(a) or a == :_) do
+    do_stop(tracer, mfa)
+  end
+
+  defp do_trace(tracer, mfa, transmission, limit) do
+    GenServer.call(tracer, {:set_trace_pattern, mfa, transmission, limit})
+  end
+
+  defp do_stop(tracer, mfa) do
+    GenServer.call(tracer, {:unset_trace_pattern, mfa})
   end
 
   @impl GenServer
-  def init(config) do
+  def init(_) do
     Logger.debug("Starting Entrace GenServer...")
     mon_ref = Process.monitor(self())
 
     state = %{
-      mfa: config.mfa,
+      trace_patterns: TracePatterns.new(),
       unmatched_traces: %{},
       matched_traces: [],
-      ref: mon_ref,
-      callback: config.callback
+      ref: mon_ref
     }
-
-    Logger.debug("Enabling tracing...")
-    processes = on(self())
-    Logger.debug("Matched #{processes} existing processes")
-    Logger.debug("Setting trace pattern: #{inspect(state.mfa)}")
-    functions = set_pattern(state.mfa)
-    Logger.debug("Matched #{functions} functions")
 
     {:ok, state}
   end
 
   @impl GenServer
-  def handle_info({:trace_ts, from_pid, :call, mfa, ts}, state) do
-    Logger.debug("Receiving call event from #{inspect(from_pid)} for #{inspect(mfa)}.")
+  def handle_info({:trace_ts, from_pid, :call, mfarguments, ts}, state) do
+    Logger.debug("Receiving call event from #{inspect(from_pid)} for #{inspect(mfarguments)}.")
     datetime = ts_to_dt!(ts)
     id = System.unique_integer([:positive, :monotonic])
 
-    trace = Trace.new(id, mfa, from_pid, datetime)
+    trace = Trace.new(id, mfarguments, from_pid, datetime)
+    mfarity = call_mfa_to_key(mfarguments)
+    pattern = TracePatterns.covered_by(state.trace_patterns, mfarity) || mfarity
+    trace_pattern = Map.get(state.trace_patterns, pattern)
 
-    if state.callback, do: state.callback.(trace)
+    trace_patterns =
+      if trace_pattern do
+        transmit(trace_pattern.transmission, trace)
 
-    key = {from_pid, call_mfa_to_key(mfa)}
+        if TracePatterns.within_limit?(state.trace_patterns, pattern) do
+          TracePatterns.increment(state.trace_patterns, pattern)
+        else
+          clear_pattern(pattern)
+
+          TracePatterns.remove(state.trace_patterns, pattern)
+        end
+      else
+        state.trace_patterns
+      end
+
+    key = {from_pid, mfarity}
     unmatched = Map.put(state.unmatched_traces, key, trace)
 
-    {:noreply, %{state | unmatched_traces: unmatched}}
+    {:noreply, %{state | unmatched_traces: unmatched, trace_patterns: trace_patterns}}
   end
 
   def handle_info({:trace_ts, from_pid, :return_from, mfa, return, ts}, state) do
     Logger.debug("Receiving return_from event from #{inspect(from_pid)} for #{inspect(mfa)}.")
     datetime = ts_to_dt!(ts)
     key = {from_pid, mfa}
+    pattern = TracePatterns.covered_by(state.trace_patterns, mfa) || mfa
+    trace_pattern = Map.get(state.trace_patterns, pattern)
 
     {unmatched, matched} =
       case Map.pop(state.unmatched_traces, key) do
@@ -69,11 +106,33 @@ defmodule Entrace do
 
         {trace, unmatched} ->
           trace = Trace.with_return(trace, mfa, from_pid, datetime, return)
-          if state.callback, do: state.callback.(trace)
+
+          if trace_pattern do
+            transmit(trace_pattern.transmission, trace)
+          end
+
           {unmatched, [trace | state.matched_traces]}
       end
 
-    {:noreply, %{state | matched_traces: matched, unmatched_traces: unmatched}}
+    trace_patterns =
+      if trace_pattern do
+        if TracePatterns.within_limit?(state.trace_patterns, pattern) do
+          TracePatterns.increment(state.trace_patterns, pattern)
+        else
+          clear_pattern(pattern)
+          TracePatterns.remove(state.trace_patterns, pattern)
+        end
+      else
+        state.trace_patterns
+      end
+
+    {:noreply,
+     %{
+       state
+       | matched_traces: matched,
+         unmatched_traces: unmatched,
+         trace_patterns: trace_patterns
+     }}
   end
 
   def handle_info({:DOWN, ref, :process, _object, _reason}, %{ref: ref} = state) do
@@ -82,20 +141,71 @@ defmodule Entrace do
     {:stop, :normal, state}
   end
 
-  def handle_info(msg, state) do
-    IO.inspect(msg, label: "received")
-    {:noreply, state}
+  @impl GenServer
+  def handle_call({:set_trace_pattern, {:_, :_, :_}, _, _}, _from, state) do
+    {:reply, {:error, :full_wildcard_rejected}, state}
   end
 
-  @impl GenServer
-  def handle_call(:stop, _from, state) do
-    Logger.debug("shutting down and disabling traces")
+  def handle_call({:set_trace_pattern, mfa, transmission, limit}, _from, state)
+      when is_pid(transmission) or is_function(transmission) or is_tuple(transmission) do
+    if TracePatterns.count(state.trace_patterns) == 0 do
+      Logger.debug("Enabling tracing...")
+      processes = on(self())
+      Logger.debug("Matched #{processes} existing processes")
+    end
 
-    traces =
-      (state.matched_traces ++ Map.values(state.unmatched_traces))
-      |> Enum.sort_by(& &1.called_at, {:asc, DateTime})
+    trace_pattern = %{mfa: mfa, msg_count: 0, limit: limit, transmission: transmission}
 
-    {:stop, :normal, traces, state}
+    {result, trace_patterns} =
+      if TracePatterns.exists?(state.trace_patterns, mfa) do
+        Logger.debug("Clearing existing trace pattern: #{inspect(mfa)}")
+        clear_pattern(mfa)
+        Logger.debug("Resetting trace pattern: #{inspect(mfa)}")
+        functions = set_pattern(mfa)
+        Logger.debug("Matched #{functions} functions")
+        tps = TracePatterns.add(state.trace_patterns, mfa, trace_pattern)
+        {{:ok, {:reset_existing, functions}}, tps}
+      else
+        case TracePatterns.covered_by(state.trace_patterns, mfa) do
+          nil ->
+            Logger.debug("Setting trace pattern: #{inspect(mfa)}")
+            functions = set_pattern(mfa)
+            Logger.debug("Matched #{functions} functions")
+            tps = TracePatterns.add(state.trace_patterns, mfa, trace_pattern)
+            {{:ok, {:set, functions}}, tps}
+
+          covering ->
+            Logger.debug(
+              "Trace pattern #{inspect(mfa)} is already covered by #{inspect(covering)}. Not setting."
+            )
+
+            {{:error, {:covered_already, mfa}}, state.trace_patterns}
+        end
+      end
+
+    {:reply, result, %{state | trace_patterns: trace_patterns}}
+  end
+
+  def handle_call({:unset_trace_pattern, mfa}, _from, state) do
+    trace_patterns = TracePatterns.remove(state.trace_patterns, mfa)
+
+    if Enum.count(trace_patterns) == 0 do
+      clear_pattern(mfa)
+    end
+
+    {:reply, :ok, %{state | trace_patterns: trace_patterns}}
+  end
+
+  defp transmit({module, function, 1} = _mfa, trace) do
+    apply(module, function, [trace])
+  end
+
+  defp transmit(callback, trace) when is_function(callback) do
+    callback.(trace)
+  end
+
+  defp transmit(pid, trace) when is_pid(pid) do
+    send(pid, {:trace, trace})
   end
 
   defp on(pid) do
@@ -111,6 +221,10 @@ defmodule Entrace do
   defp set_pattern(mfa) do
     # :erlang.trace_pattern(mfa, [{'_', [], [{:return_trace}]}], [:local])
     :erlang.trace_pattern(mfa, match_spec(), [:local])
+  end
+
+  defp clear_pattern(mfa) do
+    :erlang.trace_pattern(mfa, false, [:local])
   end
 
   defp match_spec() do
