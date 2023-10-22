@@ -15,6 +15,8 @@ defmodule Entrace.Tracer do
 
       def stop(pattern),
         do: Entrace.stop(__MODULE__, pattern)
+
+      def list_traces, do: Entrace.list_traces(__MODULE__)
     end
   end
 end

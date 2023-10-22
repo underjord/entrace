@@ -62,6 +62,10 @@ defmodule Entrace do
     Process.exit(pid, :user_halt)
   end
 
+  def list_traces(tracer) do
+    GenServer.call(tracer, :list_traces)
+  end
+
   defp do_trace(tracer, mfa, transmission, limit) do
     GenServer.call(tracer, {:set_trace_pattern, mfa, transmission, limit})
   end
@@ -220,6 +224,10 @@ defmodule Entrace do
     end
 
     {:reply, :ok, %{state | trace_patterns: trace_patterns}}
+  end
+
+  def handle_call(:list_traces, _from, state) do
+    {:reply, Map.keys(state.trace_patterns), state}
   end
 
   defp transmit({module, function, 1} = _mfa, trace) do
