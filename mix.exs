@@ -32,18 +32,10 @@ defmodule Entrace.MixProject do
   # Type `mix help deps` for examples and options.
   defp deps do
     [
-      {:phoenix, "~> 1.7.7", optional: true},
-      {:phoenix_html, "~> 3.3", optional: true},
-      {:phoenix_live_reload, "~> 1.2", only: :dev},
-      {:phoenix_live_view, "~> 0.19.0", optional: true},
-      {:floki, ">= 0.30.0", only: :test},
-      {:phoenix_live_dashboard, "~> 0.8.0", optional: true},
-      {:esbuild, "~> 0.7", runtime: Mix.env() == :dev},
       {:telemetry_metrics, "~> 0.6"},
       {:telemetry_poller, "~> 1.0"},
       {:gettext, "~> 0.20"},
       {:jason, "~> 1.2"},
-      {:plug_cowboy, "~> 2.5", optional: true},
       {:ex2ms, "~> 1.6"}
     ]
   end
@@ -56,10 +48,6 @@ defmodule Entrace.MixProject do
   # See the documentation for `Mix` for more info on aliases.
   defp aliases do
     [
-      setup: ["deps.get", "assets.setup", "assets.build"],
-      "assets.setup": ["esbuild.install --if-missing"],
-      "assets.build": ["esbuild default"],
-      "assets.deploy": ["esbuild default --minify", "phx.digest"]
     ]
   end
 end
