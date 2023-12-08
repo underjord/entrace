@@ -1,8 +1,8 @@
 defmodule Entrace.TracePatterns do
   def new, do: %{}
   def count(tps), do: Enum.count(tps)
-  def is_match_all?(tps, {:_, :_, :_}), do: true
-  def is_match_all?(tps, _), do: false
+  def is_match_all?(_tps, {:_, :_, :_}), do: true
+  def is_match_all?(_tps, _), do: false
 
   def exists?(tps, pattern) do
     case tps[pattern] do
@@ -15,7 +15,7 @@ defmodule Entrace.TracePatterns do
     not is_nil(covered_by(tps, pattern))
   end
 
-  def covered_by(tps, {m, f, a}) do
+  def covered_by(tps, {m, f, _a}) do
     case tps[{m, :_, :_}] do
       nil ->
         case tps[{m, f, :_}] do

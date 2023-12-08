@@ -11,6 +11,8 @@ defmodule Entrace.Utils do
 
   alias Entrace.Utils.App
 
+  require Logger
+
   def list_apps do
     Application.loaded_applications()
     |> Enum.map(&App.new/1)

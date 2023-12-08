@@ -40,12 +40,12 @@ defmodule Entrace.Router do
 
           live_session session_name, session_opts do
             # Assets
-            get "/css-:md5", Entrace.Assets, :css, as: :entrace_asset
-            get "/js-:md5", Entrace.Assets, :js, as: :entrace_asset
+            get("/css-:md5", Entrace.Assets, :css, as: :entrace_asset)
+            get("/js-:md5", Entrace.Assets, :js, as: :entrace_asset)
 
             # All helpers are public contracts and cannot be changed
-            live "/", Entrace.PageLive, :home, route_opts
-            live "/:page", Entrace.PageLive, :page, route_opts
+            live("/", Entrace.PageLive, :home, route_opts)
+            live("/:page", Entrace.PageLive, :page, route_opts)
           end
         end
       end
@@ -86,7 +86,7 @@ defmodule Entrace.Router do
   end
 
   @doc false
-  def __session__(conn) do
+  def __session__(_conn) do
     %{}
   end
 end
