@@ -33,7 +33,13 @@ defmodule Entrace.EntraceTest do
 
       assert :ok = Sample.a()
 
-      assert_receive {:trace, %Trace{mfa: {Sample, :a, []}, return_value: nil}}
+      assert_receive {:trace,
+                      %Trace{
+                        mfa: {Sample, :a, []},
+                        return_value: nil,
+                        caller: {Entrace.EntraceTest, _, _}
+                      }}
+
       assert_receive {:trace, %Trace{mfa: {Sample, :a, []}, return_value: {:return, :ok}}}
     end
 

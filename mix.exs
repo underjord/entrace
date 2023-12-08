@@ -28,7 +28,8 @@ defmodule Entrace.MixProject do
 
   defp deps do
     [
-      {:ex2ms, "~> 1.6"}
+      # {:ex2ms, "~> 1.6"}
+      {:ex2ms, github: "lawik/ex2ms", ref: "actions-current-stacktrace-caller-line"}
     ]
   end
 

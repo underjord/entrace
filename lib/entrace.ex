@@ -90,12 +90,26 @@ defmodule Entrace do
   end
 
   @impl GenServer
-  def handle_info({:trace_ts, from_pid, :call, mfarguments, ts}, state) do
+  def handle_info({:trace_ts, from_pid, :call, mfarguments, messages, ts}, state) do
+    {stacktrace, caller, caller_line} =
+      case messages do
+        [s, c, cl] ->
+          {s, c, cl}
+
+        [c] ->
+          {nil, c, nil}
+      end
+
     Logger.debug("Receiving call event from #{inspect(from_pid)} for #{inspect(mfarguments)}.")
     datetime = ts_to_dt!(ts)
     id = System.unique_integer([:positive, :monotonic])
 
-    trace = Trace.new(id, mfarguments, from_pid, datetime)
+    trace =
+      Trace.new(id, mfarguments, from_pid, datetime)
+      |> Trace.set_stacktrace(stacktrace)
+      |> Trace.set_caller(caller)
+      |> Trace.set_caller_line(caller_line)
+
     mfarity = call_mfa_to_key(mfarguments)
     pattern = TracePatterns.covered_by(state.trace_patterns, mfarity) || mfarity
     trace_pattern = Map.get(state.trace_patterns, pattern)
@@ -169,6 +183,11 @@ defmodule Entrace do
     Logger.debug("shutting down and disabling traces")
     off(self())
     {:stop, :normal, state}
+  end
+
+  def handle_info(other, state) do
+    IO.inspect(other, label: "msg")
+    {:noreply, state}
   end
 
   @impl GenServer
@@ -262,11 +281,24 @@ defmodule Entrace do
     :erlang.trace_pattern(mfa, false, [:local])
   end
 
+  # These are from https://www.erlang.org/doc/apps/erts/match_spec
+  # We use ex2ms here to do these
+  @otp_version String.to_integer(System.otp_release())
   defp match_spec() do
-    fun do
-      _ ->
-        return_trace()
-        exception_trace()
+    if @otp_version >= 26 do
+      fun do
+        _ ->
+          message([current_stacktrace(), caller(), caller_line()])
+          # Note: Exception implies return_trace() as well
+          exception_trace()
+      end
+    else
+      fun do
+        _ ->
+          message([caller()])
+          # Note: Exception implies return_trace() as well
+          exception_trace()
+      end
     end
   end
 

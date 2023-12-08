@@ -24,7 +24,7 @@ defmodule Entrace.Utils do
         modules
 
       err ->
-        Logger.warn("Failed to load modules for app #{name}: #{inspect(err)}")
+        Logger.warning("Failed to load modules for app #{name}: #{inspect(err)}")
         []
     end
   end
