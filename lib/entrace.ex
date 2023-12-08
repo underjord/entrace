@@ -31,26 +31,24 @@ defmodule Entrace do
     GenServer.start_link(__MODULE__, nil, opts)
   end
 
-  @default_limit 100
+  @default_limit 200
+  @big_limit 10_000
   def trace(tracer, mfa, callback, opts \\ [])
 
   def trace(tracer, {m, f, a} = mfa, callback, opts)
       when is_atom(m) and is_atom(f) and (is_integer(a) or a == :_) and is_function(callback) do
-    limit = opts[:limit] || @default_limit
-    do_trace(tracer, mfa, callback, limit)
+    do_trace(tracer, mfa, callback, opts)
   end
 
   def trace(tracer, {m, f, a} = mfa, {m2, f2, 1} = callback_mfa, opts)
       when is_atom(m) and is_atom(f) and (is_integer(a) or a == :_) and is_atom(m2) and
              is_atom(f2) do
-    limit = opts[:limit] || @default_limit
-    do_trace(tracer, mfa, callback_mfa, limit)
+    do_trace(tracer, mfa, callback_mfa, opts)
   end
 
   def trace(tracer, {m, f, a} = mfa, recipient_pid, opts)
       when is_atom(m) and is_atom(f) and (is_integer(a) or a == :_) and is_pid(recipient_pid) do
-    limit = opts[:limit] || @default_limit
-    do_trace(tracer, mfa, recipient_pid, limit)
+    do_trace(tracer, mfa, recipient_pid, opts)
   end
 
   def stop(tracer, {m, f, a} = mfa)
@@ -66,8 +64,8 @@ defmodule Entrace do
     GenServer.call(tracer, :list_traces)
   end
 
-  defp do_trace(tracer, mfa, transmission, limit) do
-    GenServer.call(tracer, {:set_trace_pattern, mfa, transmission, limit})
+  defp do_trace(tracer, mfa, transmission, opts) do
+    GenServer.call(tracer, {:set_trace_pattern, mfa, transmission, opts})
   end
 
   defp do_stop(tracer, mfa) do
@@ -179,6 +177,17 @@ defmodule Entrace do
      }}
   end
 
+  def handle_info({:time_limit_reached, mfa}, state) do
+    Logger.debug("Time limit hit, removing trace pattern for #{inspect(mfa)}")
+    trace_patterns = TracePatterns.remove(state.trace_patterns, mfa)
+
+    if Enum.count(trace_patterns) == 0 do
+      clear_pattern(mfa)
+    end
+
+    {:noreply, %{state | trace_patterns: trace_patterns}}
+  end
+
   def handle_info({:DOWN, ref, :process, _object, _reason}, %{ref: ref} = state) do
     Logger.debug("shutting down and disabling traces")
     off(self())
@@ -195,7 +204,7 @@ defmodule Entrace do
     {:reply, {:error, :full_wildcard_rejected}, state}
   end
 
-  def handle_call({:set_trace_pattern, mfa, transmission, limit}, _from, state)
+  def handle_call({:set_trace_pattern, mfa, transmission, opts}, _from, state)
       when is_pid(transmission) or is_function(transmission) or is_tuple(transmission) do
     if TracePatterns.count(state.trace_patterns) == 0 do
       Logger.debug("Enabling tracing...")
@@ -203,7 +212,23 @@ defmodule Entrace do
       Logger.debug("Matched #{processes} existing processes")
     end
 
-    trace_pattern = %{mfa: mfa, msg_count: 0, limit: limit, transmission: transmission}
+    limit =
+      if opts[:time_limit] do
+        # Send a message for clearing the trace pattern after the time limit
+        Process.send_after(self(), {:time_limit_reached, mfa}, opts[:time_limit])
+        # If limit is also set, use it, otherwise use the large safety limit
+        opts[:limit] || @big_limit
+      else
+        # If no time limit is set, use provided limit or default
+        opts[:limit] || @default_limit
+      end
+
+    trace_pattern = %{
+      mfa: mfa,
+      msg_count: 0,
+      limit: limit,
+      transmission: transmission
+    }
 
     {result, trace_patterns} =
       if TracePatterns.exists?(state.trace_patterns, mfa) do

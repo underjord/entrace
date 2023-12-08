@@ -136,14 +136,46 @@ defmodule Entrace.EntraceTest do
       pattern = {Sample, :a, 0}
       assert {:ok, {:set, 1}} = Entrace.trace(pid, pattern, self())
 
-      Enum.each(1..200, fn _ ->
+      Enum.each(1..300, fn _ ->
         Sample.a()
       end)
 
       Entrace.stop(pid, pattern)
       {:messages, msgs} = :erlang.process_info(self(), :messages)
 
-      assert Enum.count(msgs) < 102
+      assert Enum.count(msgs) < 202
+    end
+
+    test "trace to set limit", %{pid: pid} do
+      pattern = {Sample, :a, 0}
+      assert {:ok, {:set, 1}} = Entrace.trace(pid, pattern, self(), limit: 50)
+
+      Enum.each(1..100, fn _ ->
+        Sample.a()
+      end)
+
+      Entrace.stop(pid, pattern)
+      {:messages, msgs} = :erlang.process_info(self(), :messages)
+
+      assert Enum.count(msgs) < 52
+    end
+
+    test "trace to time period limit", %{pid: pid} do
+      pattern = {Sample, :hold, 1}
+      # ms
+      timelimit = 200
+      assert {:ok, {:set, 1}} = Entrace.trace(pid, pattern, self(), time_limit: timelimit)
+
+      delay = 100
+
+      Enum.each(1..5, fn _ ->
+        Sample.hold(delay)
+      end)
+
+      Entrace.stop(pid, pattern)
+      {:messages, msgs} = :erlang.process_info(self(), :messages)
+
+      assert Enum.count(msgs) < 5
     end
   end
 
