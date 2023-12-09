@@ -51,6 +51,10 @@ defmodule Entrace do
     do_trace(tracer, mfa, recipient_pid, opts)
   end
 
+  def trace_cluster(tracer, mfa, callback, opts \\ []) do
+    do_trace_cluster(tracer, mfa, callback, opts)
+  end
+
   def stop(tracer, {m, f, a} = mfa)
       when is_atom(m) and is_atom(f) and (is_integer(a) or a == :_) do
     do_stop(tracer, mfa)
@@ -68,6 +72,10 @@ defmodule Entrace do
     GenServer.call(tracer, {:set_trace_pattern, mfa, transmission, opts})
   end
 
+  defp do_trace_cluster(tracer, mfa, transmission, opts) do
+    GenServer.call(tracer, {:trace_cluster, mfa, transmission, opts})
+  end
+
   defp do_stop(tracer, mfa) do
     GenServer.call(tracer, {:unset_trace_pattern, mfa})
   end
@@ -76,6 +84,9 @@ defmodule Entrace do
   def init(_) do
     Logger.debug("Starting Entrace GenServer...")
     mon_ref = Process.monitor(self())
+
+    # Used for cluster-wide tracing
+    :pg.join(Entrace.Tracers, self())
 
     state = %{
       trace_patterns: TracePatterns.new(),
@@ -188,6 +199,23 @@ defmodule Entrace do
     {:noreply, %{state | trace_patterns: trace_patterns}}
   end
 
+  # Receiving a backhaul from a cluster trace most likely
+  # Trace pattern should be available locally as well
+  # Otherwise it is fine to drop it.
+  def handle_info({:trace, trace}, state) do
+    mfarity = call_mfa_to_key(trace.mfa)
+    pattern = TracePatterns.covered_by(state.trace_patterns, mfarity) || mfarity
+    trace_pattern = Map.get(state.trace_patterns, pattern)
+
+    if trace_pattern do
+      # Limits are handled in the remote instance
+      transmit(trace_pattern.transmission, trace)
+    end
+
+    # All the state is handled in the remote tracing instance
+    {:noreply, state}
+  end
+
   def handle_info({:DOWN, ref, :process, _object, _reason}, %{ref: ref} = state) do
     Logger.debug("shutting down and disabling traces")
     off(self())
@@ -206,6 +234,49 @@ defmodule Entrace do
 
   def handle_call({:set_trace_pattern, mfa, transmission, opts}, _from, state)
       when is_pid(transmission) or is_function(transmission) or is_tuple(transmission) do
+    {result, state} = set_trace_pattern(mfa, transmission, opts, state)
+
+    {:reply, result, state}
+  end
+
+  def handle_call({:trace_cluster, {:_, :_, :_}, _, _}, _from, state) do
+    {:reply, {:error, :full_wildcard_rejected}, state}
+  end
+
+  def handle_call({:trace_cluster, mfa, transmission, opts}, _from, state)
+      when is_pid(transmission) or is_function(transmission) or is_tuple(transmission) do
+    local_pid = self()
+    # Start local trace
+    {:reply, {:ok, _} = result, state} =
+      Entrace.handle_call({:set_trace_pattern, mfa, transmission, opts}, local_pid, state)
+
+    # Start remote traces
+    results =
+      :pg.get_members(Entrace.Tracers)
+      |> Enum.reject(&(&1 == local_pid))
+      |> Enum.map(fn pid ->
+        Entrace.trace(pid, mfa, local_pid, opts)
+      end)
+
+    {:reply, [result | results], state}
+  end
+
+  def handle_call({:unset_trace_pattern, mfa}, _from, state) do
+    trace_patterns = TracePatterns.remove(state.trace_patterns, mfa)
+
+    if Enum.count(trace_patterns) == 0 do
+      clear_pattern(mfa)
+    end
+
+    {:reply, :ok, %{state | trace_patterns: trace_patterns}}
+  end
+
+  def handle_call(:list_traces, _from, state) do
+    {:reply, Map.keys(state.trace_patterns), state}
+  end
+
+  @impl false
+  def set_trace_pattern(mfa, transmission, opts, state) do
     if TracePatterns.count(state.trace_patterns) == 0 do
       Logger.debug("Enabling tracing...")
       processes = on(self())
@@ -257,21 +328,7 @@ defmodule Entrace do
         end
       end
 
-    {:reply, result, %{state | trace_patterns: trace_patterns}}
-  end
-
-  def handle_call({:unset_trace_pattern, mfa}, _from, state) do
-    trace_patterns = TracePatterns.remove(state.trace_patterns, mfa)
-
-    if Enum.count(trace_patterns) == 0 do
-      clear_pattern(mfa)
-    end
-
-    {:reply, :ok, %{state | trace_patterns: trace_patterns}}
-  end
-
-  def handle_call(:list_traces, _from, state) do
-    {:reply, Map.keys(state.trace_patterns), state}
+    {result, %{state | trace_patterns: trace_patterns}}
   end
 
   defp transmit({module, function, 1} = _mfa, trace) do

@@ -13,6 +13,9 @@ defmodule Entrace.Tracer do
       def trace(pattern, transmission, opts \\ []),
         do: Entrace.trace(__MODULE__, pattern, transmission, opts)
 
+      def trace_cluster(pattern, transmission, opts \\ []),
+        do: Entrace.trace_cluster(__MODULE__, pattern, transmission, opts)
+
       def stop(pattern),
         do: Entrace.stop(__MODULE__, pattern)
 
