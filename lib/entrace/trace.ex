@@ -25,14 +25,16 @@ defmodule Entrace.Trace do
     %Trace{id: id, mfa: mfa, pid: pid, called_at: called_at}
   end
 
-  def set_stacktrace(%Trace{} = t, stacktrace) when is_list(stacktrace) or is_nil(stacktrace),
-    do: %Trace{t | stacktrace: stacktrace}
+  def set_stacktrace(%Trace{} = t, stacktrace)
+      when is_list(stacktrace) or stacktrace == :undefined or is_nil(stacktrace),
+      do: %Trace{t | stacktrace: stacktrace}
 
-  def set_caller(%Trace{} = t, caller) when is_tuple(caller) or is_nil(caller),
-    do: %Trace{t | caller: caller}
+  def set_caller(%Trace{} = t, caller)
+      when is_tuple(caller) or caller == :undefined or is_nil(caller),
+      do: %Trace{t | caller: caller}
 
   def set_caller_line(%Trace{} = t, caller_line)
-      when is_tuple(caller_line) or is_nil(caller_line),
+      when is_tuple(caller_line) or caller_line == :undefined or is_nil(caller_line),
       do: %Trace{t | caller_line: caller_line}
 
   def with_return(

@@ -1,4 +1,5 @@
 defmodule Entrace.Cluster do
+  require Logger
   # Taken from Phoenix.PubSub tests
   def spawn(nodes) do
     # Turn node into a distributed node with the given long name
@@ -11,6 +12,22 @@ defmodule Entrace.Cluster do
     nodes
     |> Enum.map(&Task.async(fn -> spawn_node(&1) end))
     |> Enum.map(&Task.await(&1, 30_000))
+  end
+
+  def load_and_start(node, child_spec_module) do
+    home = self()
+    Code.ensure_loaded(child_spec_module)
+
+    Node.spawn(node, fn ->
+      {:ok, _pid} = apply(child_spec_module, :start_link, [])
+      send(home, {:started, child_spec_module, Node.self()})
+      :timer.sleep(:infinity)
+    end)
+
+    receive do
+      {:started, thing, node} ->
+        Logger.debug("Started #{thing} on #{inspect(node)}")
+    end
   end
 
   defp spawn_node(node_host) do

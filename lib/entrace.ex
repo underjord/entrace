@@ -223,7 +223,7 @@ defmodule Entrace do
   end
 
   def handle_info(other, state) do
-    IO.inspect(other, label: "msg")
+    Logger.error("Got unexpected message: #{inspect(other)}")
     {:noreply, state}
   end
 
