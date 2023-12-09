@@ -68,6 +68,10 @@ defmodule Entrace do
     GenServer.call(tracer, :list_traces)
   end
 
+  def list_trace_info(tracer) do
+    GenServer.call(tracer, :list_trace_info)
+  end
+
   defp do_trace(tracer, mfa, transmission, opts) do
     GenServer.call(tracer, {:set_trace_pattern, mfa, transmission, opts})
   end
@@ -275,6 +279,27 @@ defmodule Entrace do
     {:reply, Map.keys(state.trace_patterns), state}
   end
 
+  def handle_call(:list_trace_info, _from, state) do
+    infos =
+      state.matched_traces
+      |> Enum.map(fn trace ->
+        mfarity = call_mfa_to_key(trace.mfa)
+
+        info =
+          [
+            :erlang.trace_info(mfarity, :call_count),
+            :erlang.trace_info(mfarity, :call_time),
+            :erlang.trace_info(mfarity, :call_memory)
+          ]
+          |> Map.new()
+
+        {mfarity, info}
+      end)
+      |> Map.new()
+
+    {:reply, infos, state}
+  end
+
   @impl false
   def set_trace_pattern(mfa, transmission, opts, state) do
     if TracePatterns.count(state.trace_patterns) == 0 do
@@ -355,12 +380,12 @@ defmodule Entrace do
 
   defp set_pattern(mfa) do
     # :erlang.trace_pattern(mfa, [{'_', [], [{:return_trace}]}], [:local])
-    :erlang.trace_pattern(mfa, match_spec(), [:local])
+    :erlang.trace_pattern(mfa, match_spec(), [:local, :call_count, :call_time, :call_memory])
   end
 
   defp clear_pattern(mfa) do
     Logger.debug("Clearing pattern #{inspect(mfa)}")
-    :erlang.trace_pattern(mfa, false, [:local])
+    :erlang.trace_pattern(mfa, false, [:local, :call_count, :call_time, :call_memory])
   end
 
   # These are from https://www.erlang.org/doc/apps/erts/match_spec

@@ -43,6 +43,39 @@ defmodule Entrace.EntraceTest do
       assert_receive {:trace, %Trace{mfa: {Sample, :a, []}, return_value: {:return, :ok}}}
     end
 
+    test "trace with info", %{pid: pid} do
+      mfa = {Sample, :_, :_}
+
+      assert {:ok, {:set, 7}} = Entrace.trace(pid, mfa, self())
+
+      assert :ok = Sample.a()
+      assert :ok = Sample.a()
+      assert :ok = Sample.b()
+      assert :ok = Sample.hold(20)
+
+      infos = Entrace.list_trace_info(pid)
+
+      assert %{
+               {Entrace.EntraceTest.Sample, :a, 0} => %{
+                 call_count: 2,
+                 call_memory: [{_, 2, _}],
+                 call_time: [{_, 2, 0, _}]
+               },
+               {Entrace.EntraceTest.Sample, :b, 0} => %{
+                 call_count: 1,
+                 call_memory: [{_pid3, 1, _n3}],
+                 call_time: [{_pid4, 1, 0, _n4}]
+               },
+               {Entrace.EntraceTest.Sample, :hold, 1} => %{
+                 call_count: 1,
+                 call_memory: [{_pid5, 1, _n5}],
+                 call_time: [{_pid6, 1, 0, took}]
+               }
+             } = infos
+
+      assert took >= 10
+    end
+
     test "two concurrent interleaved traces", %{pid: pid} do
       base = self()
 
