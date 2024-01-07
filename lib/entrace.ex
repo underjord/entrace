@@ -90,7 +90,7 @@ defmodule Entrace do
     mon_ref = Process.monitor(self())
 
     # Used for cluster-wide tracing
-    :pg.join(Entrace.Tracers, self())
+    :pg.join(Entrace.Tracing, Entrace.Tracers, self())
 
     state = %{
       trace_patterns: TracePatterns.new(),
@@ -256,7 +256,7 @@ defmodule Entrace do
 
     # Start remote traces
     results =
-      :pg.get_members(Entrace.Tracers)
+      :pg.get_members(Entrace.Tracing, Entrace.Tracers)
       |> Enum.reject(&(&1 == local_pid))
       |> Enum.map(fn pid ->
         Entrace.trace(pid, mfa, local_pid, opts)

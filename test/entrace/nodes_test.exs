@@ -17,7 +17,6 @@ defmodule Entrace.NodesTest do
     # Start entrace on nodes
     Node.list()
     |> Enum.each(fn node ->
-      Cluster.load_and_start(node, :pg)
       Cluster.load_and_start(node, Entrace)
     end)
 
