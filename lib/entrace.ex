@@ -72,6 +72,10 @@ defmodule Entrace do
     GenServer.call(tracer, :list_trace_info)
   end
 
+  def list_trace_patterns(tracer) do
+    GenServer.call(tracer, :list_trace_patterns)
+  end
+
   defp do_trace(tracer, mfa, transmission, opts) do
     GenServer.call(tracer, {:set_trace_pattern, mfa, transmission, opts})
   end
@@ -298,6 +302,10 @@ defmodule Entrace do
       |> Map.new()
 
     {:reply, infos, state}
+  end
+
+  def handle_call(:list_trace_patterns, _from, state) do
+    {:reply, state.trace_patterns, state}
   end
 
   @impl false

@@ -20,6 +20,8 @@ defmodule Entrace.Tracer do
         do: Entrace.stop(__MODULE__, pattern)
 
       def list_traces, do: Entrace.list_traces(__MODULE__)
+
+      def list_trace_patterns, do: Entrace.list_trace_patterns(__MODULE__)
     end
   end
 end
