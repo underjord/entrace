@@ -49,6 +49,17 @@ defmodule Entrace.TracePatterns do
     end
   end
 
+  def hit(tps, pattern, mfa) do
+    case tps[pattern] do
+      nil ->
+        tps
+
+      t ->
+        current = Map.get(t.hit_mfas, mfa, 0)
+        Map.put(tps, pattern, %{t | hit_mfas: Map.put(t.hit_mfas, mfa, current + 1)})
+    end
+  end
+
   def within_limit?(tps, pattern) do
     case tps[pattern] do
       nil ->

@@ -10,7 +10,7 @@ defmodule Entrace do
   end
   ```
 
-  And in your application.ex list och children to supervise add:application
+  And in your application.ex list of children to supervise add:
 
   ```
   MyApp.Tracer
@@ -18,22 +18,62 @@ defmodule Entrace do
 
   It will run as locally registered on it's module name (in this case `MyApp.Tracer`).
 
-  It is not useful to run multiple Tracer instances as the Erlang tracing facility has a limit on the numer of traces.
-
+  It is not useful to run multiple Tracer instances as the Erlang tracing facility has some limits around how many tracers you can operate.
   """
+
   use GenServer
   import Ex2ms
   require Logger
   alias Entrace.Trace
   alias Entrace.TracePatterns
 
+  @default_limit 200
+  @big_limit 10_000
+
+  @type tracer() :: GenServer.server()
+  @type mfa_pattern() :: {atom(), atom(), atom() | non_neg_integer()}
+  @type transmission() :: function() | pid() | mfa()
+
+  @doc """
+  Starts the Tracer linked to the parent process.
+
+  Operations can then be performed on the resulting pid or registered name.
+
+  All options are passed along to the GenServer.start_link. There is no
+  configuration for the tracer.
+  """
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, nil, opts)
   end
 
-  @default_limit 200
-  @big_limit 10_000
-  def trace(tracer, mfa, callback, opts \\ [])
+  @doc """
+  Start a trace for a provided `pattern` and `transmission` mechanism.
+
+  The `pattern` is an mfa tuple, as in `{module, function, arity}`.
+  For example `{File, read, 1}` to trace the `File.read/1` function. It
+  supports a special underscore atom `:_` to indicate a wilcard in the mfa.
+  You can only use wildcards on the function and arity and Erlang's tracing
+  only allows wildcard function if the arity is also a wildcard.
+
+  The `transmission` is one of:
+
+  * a `PID` to send traces to.
+  * a callback function.
+  * a callback function provided as `{module, function, arity}`
+
+  Optional options are available. The options are:
+
+  * `limit` - the maximum number of messages to process before ending the trace
+    on that pattern. Default limit is 200.
+  * `time_limit` - time to leave the trace running. If no `limit` is specified
+    this will use a larger default limit of 10_000.
+
+
+  """
+  @spec trace(tracer :: tracer(), mfa :: mfa(), transmission :: transmission(), opts :: keyword()) ::
+          {:ok, {:set, non_neg_integer()} | {:reset_existing, non_neg_integer()}}
+          | {:error, {:covered_already, mfa_pattern()} | :full_wildcard_rejected}
+  def trace(tracer, mfa, transmission, opts \\ [])
 
   def trace(tracer, {m, f, a} = mfa, callback, opts)
       when is_atom(m) and is_atom(f) and (is_integer(a) or a == :_) and is_function(callback) do
@@ -51,19 +91,27 @@ defmodule Entrace do
     do_trace(tracer, mfa, recipient_pid, opts)
   end
 
-  def trace_cluster(tracer, mfa, callback, opts \\ []) do
-    do_trace_cluster(tracer, mfa, callback, opts)
+  def trace_cluster(tracer, mfa, transmission, opts \\ []) do
+    do_trace_cluster(tracer, mfa, transmission, opts)
   end
 
+  @doc """
+  Stop tracing the `mfa` pattern.
+  """
+  @spec stop(tracer :: tracer(), mfa :: mfa_pattern()) :: :ok
   def stop(tracer, {m, f, a} = mfa)
       when is_atom(m) and is_atom(f) and (is_integer(a) or a == :_) do
     do_stop(tracer, mfa)
   end
 
+  @doc false
   def exit(pid) do
     Process.exit(pid, :user_halt)
   end
 
+  @doc """
+  Fetch a list of received traces
+  """
   def list_traces(tracer) do
     GenServer.call(tracer, :list_traces)
   end
@@ -99,7 +147,6 @@ defmodule Entrace do
     state = %{
       trace_patterns: TracePatterns.new(),
       unmatched_traces: %{},
-      matched_traces: [],
       ref: mon_ref
     }
 
@@ -159,11 +206,11 @@ defmodule Entrace do
     pattern = TracePatterns.covered_by(state.trace_patterns, mfa) || mfa
     trace_pattern = Map.get(state.trace_patterns, pattern)
 
-    {unmatched, matched} =
+    unmatched =
       case Map.pop(state.unmatched_traces, key) do
         {nil, unmatched} ->
           Logger.error("Got return trace but found no unmatched call.")
-          {unmatched, state.matched_traces}
+          unmatched
 
         {trace, unmatched} ->
           trace = Trace.with_return(trace, mfa, from_pid, datetime, return)
@@ -172,13 +219,15 @@ defmodule Entrace do
             transmit(trace_pattern.transmission, trace)
           end
 
-          {unmatched, [trace | state.matched_traces]}
+          unmatched
       end
 
     trace_patterns =
       if trace_pattern do
         if TracePatterns.within_limit?(state.trace_patterns, pattern) do
-          TracePatterns.increment(state.trace_patterns, pattern)
+          state.trace_patterns
+          |> TracePatterns.increment(pattern)
+          |> TracePatterns.hit(pattern, mfa)
         else
           clear_pattern(pattern)
           TracePatterns.remove(state.trace_patterns, pattern)
@@ -190,8 +239,7 @@ defmodule Entrace do
     {:noreply,
      %{
        state
-       | matched_traces: matched,
-         unmatched_traces: unmatched,
+       | unmatched_traces: unmatched,
          trace_patterns: trace_patterns
      }}
   end
@@ -285,19 +333,21 @@ defmodule Entrace do
 
   def handle_call(:list_trace_info, _from, state) do
     infos =
-      state.matched_traces
-      |> Enum.map(fn trace ->
-        mfarity = call_mfa_to_key(trace.mfa)
+      state.trace_patterns
+      |> Enum.flat_map(fn {_pattern, tp} ->
+        tp.hit_mfas
+        |> Map.keys()
+        |> Enum.map(fn mfarity ->
+          info =
+            [
+              :erlang.trace_info(mfarity, :call_count),
+              :erlang.trace_info(mfarity, :call_time),
+              :erlang.trace_info(mfarity, :call_memory)
+            ]
+            |> Map.new()
 
-        info =
-          [
-            :erlang.trace_info(mfarity, :call_count),
-            :erlang.trace_info(mfarity, :call_time),
-            :erlang.trace_info(mfarity, :call_memory)
-          ]
-          |> Map.new()
-
-        {mfarity, info}
+          {mfarity, info}
+        end)
       end)
       |> Map.new()
 
@@ -331,7 +381,8 @@ defmodule Entrace do
       mfa: mfa,
       msg_count: 0,
       limit: limit,
-      transmission: transmission
+      transmission: transmission,
+      hit_mfas: %{}
     }
 
     {result, trace_patterns} =
