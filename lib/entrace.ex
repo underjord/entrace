@@ -33,6 +33,8 @@ defmodule Entrace do
   @type tracer() :: GenServer.server()
   @type mfa_pattern() :: {atom(), atom(), atom() | non_neg_integer()}
   @type transmission() :: function() | pid() | mfa()
+  @type trace_result() :: {:set, non_neg_integer()} | {:reset_existing, non_neg_integer()}
+  @type trace_error() :: {:covered_already, mfa_pattern()} | :full_wildcard_rejected
 
   @doc """
   Starts the Tracer linked to the parent process.
@@ -68,11 +70,14 @@ defmodule Entrace do
   * `time_limit` - time to leave the trace running. If no `limit` is specified
     this will use a larger default limit of 10_000.
 
-
+  Returns information about how setting the trace pattern worked out.
   """
-  @spec trace(tracer :: tracer(), mfa :: mfa(), transmission :: transmission(), opts :: keyword()) ::
-          {:ok, {:set, non_neg_integer()} | {:reset_existing, non_neg_integer()}}
-          | {:error, {:covered_already, mfa_pattern()} | :full_wildcard_rejected}
+  @spec trace(
+          tracer :: tracer(),
+          mfa :: mfa_pattern(),
+          transmission :: transmission(),
+          opts :: keyword()
+        ) :: {:ok, trace_result()} | {:error, trace_error()}
   def trace(tracer, mfa, transmission, opts \\ [])
 
   def trace(tracer, {m, f, a} = mfa, callback, opts)
@@ -91,6 +96,17 @@ defmodule Entrace do
     do_trace(tracer, mfa, recipient_pid, opts)
   end
 
+  @doc """
+  Start a trace across the entire cluster.
+
+  See `Entrace.trace/4` for details on arguments.
+  """
+  @spec trace_cluster(
+          tracer :: tracer(),
+          mfa :: mfa_pattern(),
+          transmission :: transmission(),
+          opts :: keyword()
+        ) :: [{:ok, trace_result()} | {:error, trace_error()}]
   def trace_cluster(tracer, mfa, transmission, opts \\ []) do
     do_trace_cluster(tracer, mfa, transmission, opts)
   end
@@ -110,16 +126,23 @@ defmodule Entrace do
   end
 
   @doc """
-  Fetch a list of received traces
-  """
-  def list_traces(tracer) do
-    GenServer.call(tracer, :list_traces)
-  end
+  Get a map of trace info for function calls based on patterns.
 
+  The map is keyed by mfas that have been seen during the trace.
+  Trace info includes information from `:erlang.trace_info/2`.
+  It includes `:call_count`, `:call_memory` and `:call_time`.
+  """
+  @spec list_trace_info(tracer :: tracer()) :: map()
   def list_trace_info(tracer) do
     GenServer.call(tracer, :list_trace_info)
   end
 
+  @doc """
+  Get map of trace patterns.
+
+  This should be tidied up, exposes a bit much in terms of internals.
+  """
+  @spec list_trace_patterns(tracer :: tracer()) :: map()
   def list_trace_patterns(tracer) do
     GenServer.call(tracer, :list_trace_patterns)
   end
@@ -327,10 +350,6 @@ defmodule Entrace do
     {:reply, :ok, %{state | trace_patterns: trace_patterns}}
   end
 
-  def handle_call(:list_traces, _from, state) do
-    {:reply, Map.keys(state.trace_patterns), state}
-  end
-
   def handle_call(:list_trace_info, _from, state) do
     infos =
       state.trace_patterns
@@ -358,8 +377,7 @@ defmodule Entrace do
     {:reply, state.trace_patterns, state}
   end
 
-  @impl false
-  def set_trace_pattern(mfa, transmission, opts, state) do
+  defp set_trace_pattern(mfa, transmission, opts, state) do
     if TracePatterns.count(state.trace_patterns) == 0 do
       Logger.debug("Enabling tracing...")
       processes = on(self())
