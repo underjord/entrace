@@ -25,6 +25,7 @@ defmodule Entrace do
   import Ex2ms
   require Logger
   alias Entrace.Trace
+  alias Entrace.TracePattern
   alias Entrace.TracePatterns
 
   @default_limit 200
@@ -169,7 +170,6 @@ defmodule Entrace do
 
     state = %{
       trace_patterns: TracePatterns.new(),
-      unmatched_traces: %{},
       ref: mon_ref
     }
 
@@ -201,12 +201,18 @@ defmodule Entrace do
     pattern = TracePatterns.covered_by(state.trace_patterns, mfarity) || mfarity
     trace_pattern = Map.get(state.trace_patterns, pattern)
 
+    key = {from_pid, mfarity}
+
     trace_patterns =
       if trace_pattern do
         transmit(trace_pattern.transmission, trace)
 
         if TracePatterns.within_limit?(state.trace_patterns, pattern) do
-          TracePatterns.increment(state.trace_patterns, pattern)
+          trace_pattern = TracePattern.save_unmatched(trace_pattern, key, trace)
+
+          state.trace_patterns
+          |> TracePatterns.add(pattern, trace_pattern)
+          |> TracePatterns.increment(pattern)
         else
           clear_pattern(pattern)
 
@@ -216,10 +222,7 @@ defmodule Entrace do
         state.trace_patterns
       end
 
-    key = {from_pid, mfarity}
-    unmatched = Map.put(state.unmatched_traces, key, trace)
-
-    {:noreply, %{state | unmatched_traces: unmatched, trace_patterns: trace_patterns}}
+    {:noreply, %{state | trace_patterns: trace_patterns}}
   end
 
   def handle_info({:trace_ts, from_pid, :return_from, mfa, return, ts}, state) do
@@ -229,26 +232,24 @@ defmodule Entrace do
     pattern = TracePatterns.covered_by(state.trace_patterns, mfa) || mfa
     trace_pattern = Map.get(state.trace_patterns, pattern)
 
-    unmatched =
-      case Map.pop(state.unmatched_traces, key) do
-        {nil, unmatched} ->
-          Logger.error("Got return trace but found no unmatched call.")
-          unmatched
-
-        {trace, unmatched} ->
-          trace = Trace.with_return(trace, mfa, from_pid, datetime, return)
-
-          if trace_pattern do
-            transmit(trace_pattern.transmission, trace)
-          end
-
-          unmatched
-      end
-
     trace_patterns =
       if trace_pattern do
+        trace_pattern =
+          case TracePattern.pop_unmatched(trace_pattern, key) do
+            {nil, trace_pattern} ->
+              trace_pattern
+
+            {trace, trace_pattern} ->
+              trace = Trace.with_return(trace, mfa, from_pid, datetime, return)
+
+              transmit(trace_pattern.transmission, trace)
+
+              trace_pattern
+          end
+
         if TracePatterns.within_limit?(state.trace_patterns, pattern) do
           state.trace_patterns
+          |> TracePatterns.add(pattern, trace_pattern)
           |> TracePatterns.increment(pattern)
           |> TracePatterns.hit(pattern, mfa)
         else
@@ -259,12 +260,7 @@ defmodule Entrace do
         state.trace_patterns
       end
 
-    {:noreply,
-     %{
-       state
-       | unmatched_traces: unmatched,
-         trace_patterns: trace_patterns
-     }}
+    {:noreply, %{state | trace_patterns: trace_patterns}}
   end
 
   def handle_info({:time_limit_reached, mfa}, state) do
@@ -395,13 +391,7 @@ defmodule Entrace do
         opts[:limit] || @default_limit
       end
 
-    trace_pattern = %{
-      mfa: mfa,
-      msg_count: 0,
-      limit: limit,
-      transmission: transmission,
-      hit_mfas: %{}
-    }
+    trace_pattern = TracePattern.new(mfa, limit, transmission)
 
     {result, trace_patterns} =
       if TracePatterns.exists?(state.trace_patterns, mfa) do

@@ -1,4 +1,10 @@
 defmodule Entrace.TracePatterns do
+  alias Entrace.TracePattern
+
+  @type t :: %{
+          mfa() => Entrace.TracePattern.t()
+        }
+
   def new, do: %{}
   def count(tps), do: Enum.count(tps)
   def is_match_all?(_tps, {:_, :_, :_}), do: true
@@ -31,8 +37,8 @@ defmodule Entrace.TracePatterns do
     end
   end
 
-  def add(tps, pattern, metadata) do
-    Map.put(tps, pattern, metadata)
+  def add(tps, pattern, %TracePattern{} = trace_pattern) do
+    Map.put(tps, pattern, trace_pattern)
   end
 
   def remove(tps, pattern) do
