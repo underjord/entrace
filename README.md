@@ -37,6 +37,10 @@ When you want to trace a function in your app from iex:
 MyApp.Tracer.trace_cluster({MyApp.TheModule, :my_function, 3}, &IO.inspect/1)
 ```
 
+## In a Phoenix app?
+
+There is another library using Entrace that will enable using it inside of Phoenix Live Dashboard. You get web UI for tracing :) Check it out at [entrace_live_dashboard](https://github.com/underjord/entrace_live_dashboard).
+
 ## Using the primitives
 
 ```elixir
