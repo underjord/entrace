@@ -9,7 +9,22 @@ defmodule Entrace.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
-      deps: deps()
+      deps: deps(),
+
+      # Docs
+      name: "Entrace",
+      description: "Easy tracing on the BEAM with Elixir",
+      source_url: "https://github.com/underjord/entrace",
+      docs: [
+        # The main page in the docs
+        main: "readme",
+        extras: ["README.md"]
+      ],
+      package: [
+        name: :entrace,
+        licenses: ["MIT"],
+        links: %{"GitHub" => "https://github.com/underjord/entrace"}
+      ]
     ]
   end
 
@@ -29,8 +44,8 @@ defmodule Entrace.MixProject do
 
   defp deps do
     [
-      # {:ex2ms, "~> 1.6"}
-      {:ex2ms, github: "lawik/ex2ms", ref: "actions-current-stacktrace-caller-line"}
+      {:ex2ms, "~> 1.7"},
+      {:ex_doc, "~> 0.31", only: :dev, runtime: false}
     ]
   end
 
