@@ -2,6 +2,8 @@
 
 A library to make it easy to use the fantastic Erlang/OTP tracing facilities in an idiomatically Elixir way. Built-in safeties and discoverable function naming. The hope is that this makes a BEAM superpower more well-known in the Elixir community.
 
+Tested to work at least as far back as OTP 24, gets more features under OTP 25/26.
+
 ## Installation
 
 To install, add it to `mix.exs` under the `deps`:
