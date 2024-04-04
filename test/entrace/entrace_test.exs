@@ -5,6 +5,7 @@ defmodule Entrace.EntraceTest do
   use ExUnit.Case, async: false
 
   alias Entrace.Trace
+  @otp_version String.to_integer(System.otp_release())
 
   describe "basic" do
     defmodule Sample do
@@ -47,7 +48,7 @@ defmodule Entrace.EntraceTest do
     test "trace with info", %{pid: pid} do
       mfa = {Sample, :_, :_}
 
-      assert {:ok, {:set, 7}} = Entrace.trace(pid, mfa, self())
+      assert {:ok, {:set, _}} = Entrace.trace(pid, mfa, self())
 
       assert :ok = Sample.a()
       assert :ok = Sample.a()
@@ -65,26 +66,45 @@ defmodule Entrace.EntraceTest do
 
       infos = Entrace.list_trace_info(pid)
 
-      assert %{
-               {Entrace.EntraceTest.Sample, :a, 0} => %{
-                 call_count: 3,
-                 # ordering becomes arbitrary
-                 call_memory: [{_, _, _}, {_, _, _}],
-                 # ordering becomes arbitrary
-                 call_time: [{_, _, _, _}, {_, _, _, _}]
-               },
-               {Entrace.EntraceTest.Sample, :b, 0} => %{
-                 call_count: 1,
-                 call_memory: [{_pid3, 1, _n3}],
-                 call_time: [{_pid4, 1, 0, _n4}]
-               },
-               {Entrace.EntraceTest.Sample, :hold, 1} => %{
-                 call_count: 1,
-                 call_memory: [{_pid5, 1, _n5}],
-                 # This is weirdly sometimes 8 instead of up towards 40
-                 call_time: [{_pid6, 1, 0, _took}]
-               }
-             } = infos
+      if @otp_version >= 26 do
+        assert %{
+                 {Entrace.EntraceTest.Sample, :a, 0} => %{
+                   call_count: 3,
+                   # ordering becomes arbitrary
+                   call_memory: [{_, _, _}, {_, _, _}],
+                   # ordering becomes arbitrary
+                   call_time: [{_, _, _, _}, {_, _, _, _}]
+                 },
+                 {Entrace.EntraceTest.Sample, :b, 0} => %{
+                   call_count: 1,
+                   call_memory: [{_pid3, 1, _n3}],
+                   call_time: [{_pid4, 1, 0, _n4}]
+                 },
+                 {Entrace.EntraceTest.Sample, :hold, 1} => %{
+                   call_count: 1,
+                   call_memory: [{_pid5, 1, _n5}],
+                   # This is weirdly sometimes 8 instead of up towards 40
+                   call_time: [{_pid6, 1, 0, _took}]
+                 }
+               } = infos
+      else
+        assert %{
+                 {Entrace.EntraceTest.Sample, :a, 0} => %{
+                   call_count: 3,
+                   # ordering becomes arbitrary
+                   call_time: [{_, _, _, _}, {_, _, _, _}]
+                 },
+                 {Entrace.EntraceTest.Sample, :b, 0} => %{
+                   call_count: 1,
+                   call_time: [{_pid4, 1, 0, _n4}]
+                 },
+                 {Entrace.EntraceTest.Sample, :hold, 1} => %{
+                   call_count: 1,
+                   # This is weirdly sometimes 8 instead of up towards 40
+                   call_time: [{_pid6, 1, 0, _took}]
+                 }
+               } = infos
+      end
 
       # Flaky, disabling
       # assert took >= 10
