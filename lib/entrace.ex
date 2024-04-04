@@ -30,6 +30,7 @@ defmodule Entrace do
 
   @default_limit 200
   @big_limit 10_000
+  @otp_version String.to_integer(System.otp_release())
 
   @type tracer() :: GenServer.server()
   @type mfa_pattern() :: {atom(), atom(), atom() | non_neg_integer()}
@@ -354,12 +355,20 @@ defmodule Entrace do
         |> Map.keys()
         |> Enum.map(fn mfarity ->
           info =
-            [
-              :erlang.trace_info(mfarity, :call_count),
-              :erlang.trace_info(mfarity, :call_time),
-              :erlang.trace_info(mfarity, :call_memory)
-            ]
-            |> Map.new()
+            if @otp_version >= 26 do
+              [
+                :erlang.trace_info(mfarity, :call_count),
+                :erlang.trace_info(mfarity, :call_time),
+                :erlang.trace_info(mfarity, :call_memory)
+              ]
+              |> Map.new()
+            else
+              [
+                :erlang.trace_info(mfarity, :call_count),
+                :erlang.trace_info(mfarity, :call_time)
+              ]
+              |> Map.new()
+            end
 
           {mfarity, info}
         end)
@@ -445,19 +454,22 @@ defmodule Entrace do
     # :erlang.trace(:all, false, [:call, {:tracer, pid}])
   end
 
+  @pattern_opts (if @otp_version >= 26 do
+                   [:local, :call_count, :call_time, :call_memory]
+                 else
+                   [:local, :call_count, :call_time]
+                 end)
   defp set_pattern(mfa) do
-    # :erlang.trace_pattern(mfa, [{'_', [], [{:return_trace}]}], [:local])
-    :erlang.trace_pattern(mfa, match_spec(), [:local, :call_count, :call_time, :call_memory])
+    :erlang.trace_pattern(mfa, match_spec(), @pattern_opts)
   end
 
   defp clear_pattern(mfa) do
     Logger.debug("Clearing pattern #{inspect(mfa)}")
-    :erlang.trace_pattern(mfa, false, [:local, :call_count, :call_time, :call_memory])
+    :erlang.trace_pattern(mfa, false, @pattern_opts)
   end
 
   # These are from https://www.erlang.org/doc/apps/erts/match_spec
   # We use ex2ms here to do these
-  @otp_version String.to_integer(System.otp_release())
   defp match_spec() do
     if @otp_version >= 26 do
       fun do
