@@ -5,7 +5,7 @@ defmodule Entrace.Tracer do
         opts =
           opts
           |> Keyword.put(:name, __MODULE__)
-          |> Keyword.put_new(:session_name, __MODULE__)
+          |> Keyword.put_new(:session_prefix, __MODULE__)
 
         %{
           id: Entrace,
