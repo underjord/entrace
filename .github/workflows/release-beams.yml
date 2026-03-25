@@ -22,9 +22,8 @@ jobs:
         include:
           - otp: "27"
             elixir: "1.17"
-          # Add new OTP versions here as they release
-          # - otp: "28"
-          #   elixir: "1.18"
+          - otp: "28"
+            elixir: "1.18"
 
     steps:
       - uses: actions/checkout@v4
