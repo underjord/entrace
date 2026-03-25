@@ -1,4 +1,6 @@
 defmodule Entrace.Tracer do
+  @moduledoc false
+
   defmacro __using__(opts) do
     quote bind_quoted: [opts: opts] do
       def child_spec(opts) do
@@ -18,7 +20,7 @@ defmodule Entrace.Tracer do
 
       The `pattern` is an mfa tuple, as in `{module, function, arity}`.
       For example `{File, read, 1}` to trace the `File.read/1` function. It
-      supports a special underscore atom `:_` to indicate a wilcard in the mfa.
+      supports a special underscore atom `:_` to indicate a wildcard in the mfa.
       You can only use wildcards on the function and arity and Erlang's tracing
       only allows wildcard function if the arity is also a wildcard.
 
@@ -73,7 +75,7 @@ defmodule Entrace.Tracer do
       It includes `:call_count`, `:call_memory` and `:call_time`.
       """
       @spec list_trace_info() :: map()
-      def list_trace_info, do: Entrace.list_trace_info(__MODULE__)
+      def list_trace_info(), do: Entrace.list_trace_info(__MODULE__)
 
       @doc """
       Get map of trace patterns.
@@ -81,7 +83,7 @@ defmodule Entrace.Tracer do
       This should be tidied up, exposes a bit much in terms of internals.
       """
       @spec list_trace_patterns() :: map()
-      def list_trace_patterns, do: Entrace.list_trace_patterns(__MODULE__)
+      def list_trace_patterns(), do: Entrace.list_trace_patterns(__MODULE__)
     end
   end
 end

@@ -1,4 +1,8 @@
 defmodule Entrace.Trace do
+  @moduledoc false
+
+  alias __MODULE__, as: Trace
+
   defstruct id: nil,
             mfa: nil,
             pid: nil,
@@ -9,34 +13,37 @@ defmodule Entrace.Trace do
             caller: nil,
             caller_line: nil
 
-  alias Entrace.Trace
-
   @type t :: %Trace{
           id: integer(),
-          mfa: {atom(), atom(), atom() | non_neg_integer()},
+          mfa: {atom(), atom(), list()},
           pid: pid(),
           called_at: DateTime.t(),
           returned_at: DateTime.t() | nil,
           return_value: nil | :too_large | {:return, term()}
         }
 
+  @spec new(integer(), {atom(), atom(), list()}, pid(), DateTime.t()) :: t()
   def new(id, {m, f, a} = mfa, pid, %DateTime{} = called_at)
       when is_atom(m) and is_atom(f) and (is_atom(a) or a >= 0) and is_pid(pid) do
     %Trace{id: id, mfa: mfa, pid: pid, called_at: called_at}
   end
 
+  @spec set_stacktrace(t(), list() | :undefined | nil) :: t()
   def set_stacktrace(%Trace{} = t, stacktrace)
       when is_list(stacktrace) or stacktrace == :undefined or is_nil(stacktrace),
       do: %Trace{t | stacktrace: stacktrace}
 
+  @spec set_caller(t(), tuple() | :undefined | nil) :: t()
   def set_caller(%Trace{} = t, caller)
       when is_tuple(caller) or caller == :undefined or is_nil(caller),
       do: %Trace{t | caller: caller}
 
+  @spec set_caller_line(t(), tuple() | :undefined | nil) :: t()
   def set_caller_line(%Trace{} = t, caller_line)
       when is_tuple(caller_line) or caller_line == :undefined or is_nil(caller_line),
       do: %Trace{t | caller_line: caller_line}
 
+  @spec with_return(t(), {atom(), atom(), non_neg_integer()}, pid(), DateTime.t(), term()) :: t()
   def with_return(
         %Trace{mfa: {m, f, args}, pid: pid} = trace,
         {m, f, arity},

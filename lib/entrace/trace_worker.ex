@@ -2,24 +2,31 @@ defmodule Entrace.TraceWorker do
   @moduledoc false
 
   use GenServer
+
   import Ex2ms
-  require Logger
+
   alias Entrace.Trace
+
+  require Logger
 
   @pattern_opts [:local, :call_count, :call_time, :call_memory]
 
+  @spec start_link(map()) :: GenServer.on_start()
   def start_link(config) do
     GenServer.start_link(__MODULE__, config)
   end
 
+  @spec stop(pid()) :: :ok
   def stop(pid) do
     GenServer.stop(pid)
   end
 
+  @spec get_matched_count(pid()) :: non_neg_integer()
   def get_matched_count(pid) do
     GenServer.call(pid, :get_matched_count)
   end
 
+  @spec get_trace_info(pid()) :: [{mfa(), map()}]
   def get_trace_info(pid) do
     GenServer.call(pid, :get_trace_info)
   end
@@ -120,7 +127,11 @@ defmodule Entrace.TraceWorker do
       hit_count = Map.get(state.hit_mfas, mfa, 0)
 
       {:noreply,
-       %{state | msg_count: state.msg_count + 1, hit_mfas: Map.put(state.hit_mfas, mfa, hit_count + 1)}}
+       %{
+         state
+         | msg_count: state.msg_count + 1,
+           hit_mfas: Map.put(state.hit_mfas, mfa, hit_count + 1)
+       }}
     else
       {:stop, :normal, state}
     end

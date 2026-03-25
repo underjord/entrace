@@ -26,9 +26,10 @@ defmodule Entrace do
   """
 
   use GenServer
-  require Logger
 
   alias Entrace.TraceWorker
+
+  require Logger
 
   @default_limit 200
   @big_limit 10_000
@@ -48,6 +49,7 @@ defmodule Entrace do
   * `:session_prefix` - atom prefix for trace session names (default: `:entrace`)
   * All other options are passed to `GenServer.start_link/3`.
   """
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     {session_prefix, opts} = Keyword.pop(opts, :session_prefix, :entrace)
     GenServer.start_link(__MODULE__, session_prefix, opts)
@@ -58,7 +60,7 @@ defmodule Entrace do
 
   The `pattern` is an mfa tuple, as in `{module, function, arity}`.
   For example `{File, read, 1}` to trace the `File.read/1` function. It
-  supports a special underscore atom `:_` to indicate a wilcard in the mfa.
+  supports a special underscore atom `:_` to indicate a wildcard in the mfa.
   You can only use wildcards on the function and arity and Erlang's tracing
   only allows wildcard function if the arity is also a wildcard.
 
@@ -126,6 +128,7 @@ defmodule Entrace do
   end
 
   @doc false
+  @spec exit(pid()) :: true
   def exit(pid) do
     Process.exit(pid, :user_halt)
   end

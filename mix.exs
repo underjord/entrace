@@ -90,8 +90,4 @@ defmodule Entrace.MixProject do
       {:spellweaver, "~> 0.1", only: [:dev, :test], runtime: false}
     ]
   end
-
-  defp aliases do
-    []
-  end
 end

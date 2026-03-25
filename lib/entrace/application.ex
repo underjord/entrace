@@ -2,6 +2,7 @@ defmodule Entrace.Application do
   @moduledoc false
   use Application
 
+  @spec start(term(), term()) :: {:ok, pid()} | {:error, term()}
   def start(_, _) do
     children = pg_children()
     Supervisor.start_link(children, strategy: :one_for_one)
