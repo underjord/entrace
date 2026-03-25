@@ -18,7 +18,10 @@ defmodule Entrace do
 
   It will run as locally registered on it's module name (in this case `MyApp.Tracer`).
 
-  It is not useful to run multiple Tracer instances as the Erlang tracing facility has some limits around how many tracers you can operate.
+  Each Tracer instance uses its own OTP 27+ trace session, so multiple Tracer
+  instances can operate independently without interfering with each other.
+
+  Requires OTP 27 or later.
   """
 
   use GenServer
@@ -30,7 +33,6 @@ defmodule Entrace do
 
   @default_limit 200
   @big_limit 10_000
-  @otp_version String.to_integer(System.otp_release())
 
   @type tracer() :: GenServer.server()
   @type mfa_pattern() :: {atom(), atom(), atom() | non_neg_integer()}
@@ -43,11 +45,13 @@ defmodule Entrace do
 
   Operations can then be performed on the resulting pid or registered name.
 
-  All options are passed along to the GenServer.start_link. There is no
-  configuration for the tracer.
+  Options:
+  * `:session_name` - atom name for the trace session (default: `:entrace`)
+  * All other options are passed to `GenServer.start_link/3`.
   """
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, nil, opts)
+    {session_name, opts} = Keyword.pop(opts, :session_name, :entrace)
+    GenServer.start_link(__MODULE__, session_name, opts)
   end
 
   @doc """
@@ -131,7 +135,7 @@ defmodule Entrace do
   Get a map of trace info for function calls based on patterns.
 
   The map is keyed by mfas that have been seen during the trace.
-  Trace info includes information from `:erlang.trace_info/2`.
+  Trace info includes information from `:trace.info/3`.
   It includes `:call_count`, `:call_memory` and `:call_time`.
   """
   @spec list_trace_info(tracer :: tracer()) :: map()
@@ -162,16 +166,17 @@ defmodule Entrace do
   end
 
   @impl GenServer
-  def init(_) do
+  def init(session_name) do
     Logger.debug("Starting Entrace GenServer...")
-    mon_ref = Process.monitor(self())
+    session = :trace.session_create(session_name, self(), [])
+    :trace.process(session, :all, true, [:call, :timestamp])
 
     # Used for cluster-wide tracing
     :pg.join(Entrace.Tracing, Entrace.Tracers, self())
 
     state = %{
       trace_patterns: TracePatterns.new(),
-      ref: mon_ref
+      session: session
     }
 
     {:ok, state}
@@ -215,7 +220,7 @@ defmodule Entrace do
           |> TracePatterns.add(pattern, trace_pattern)
           |> TracePatterns.increment(pattern)
         else
-          clear_pattern(pattern)
+          clear_pattern(state.session, pattern)
 
           TracePatterns.remove(state.trace_patterns, pattern)
         end
@@ -254,7 +259,7 @@ defmodule Entrace do
           |> TracePatterns.increment(pattern)
           |> TracePatterns.hit(pattern, mfa)
         else
-          clear_pattern(pattern)
+          clear_pattern(state.session, pattern)
           TracePatterns.remove(state.trace_patterns, pattern)
         end
       else
@@ -269,7 +274,7 @@ defmodule Entrace do
     trace_patterns = TracePatterns.remove(state.trace_patterns, mfa)
 
     if Enum.count(trace_patterns) == 0 do
-      clear_pattern(mfa)
+      clear_pattern(state.session, mfa)
     end
 
     {:noreply, %{state | trace_patterns: trace_patterns}}
@@ -292,15 +297,15 @@ defmodule Entrace do
     {:noreply, state}
   end
 
-  def handle_info({:DOWN, ref, :process, _object, _reason}, %{ref: ref} = state) do
-    Logger.debug("shutting down and disabling traces")
-    off(self())
-    {:stop, :normal, state}
-  end
-
   def handle_info(other, state) do
     Logger.error("Got unexpected message: #{inspect(other)}")
     {:noreply, state}
+  end
+
+  @impl GenServer
+  def terminate(_reason, state) do
+    Logger.debug("Shutting down and destroying trace session")
+    :trace.session_destroy(state.session)
   end
 
   @impl GenServer
@@ -341,7 +346,7 @@ defmodule Entrace do
     trace_patterns = TracePatterns.remove(state.trace_patterns, mfa)
 
     if Enum.count(trace_patterns) == 0 do
-      clear_pattern(mfa)
+      clear_pattern(state.session, mfa)
     end
 
     {:reply, :ok, %{state | trace_patterns: trace_patterns}}
@@ -355,20 +360,12 @@ defmodule Entrace do
         |> Map.keys()
         |> Enum.map(fn mfarity ->
           info =
-            if @otp_version >= 26 do
-              [
-                :erlang.trace_info(mfarity, :call_count),
-                :erlang.trace_info(mfarity, :call_time),
-                :erlang.trace_info(mfarity, :call_memory)
-              ]
-              |> Map.new()
-            else
-              [
-                :erlang.trace_info(mfarity, :call_count),
-                :erlang.trace_info(mfarity, :call_time)
-              ]
-              |> Map.new()
-            end
+            [
+              :trace.info(state.session, mfarity, :call_count),
+              :trace.info(state.session, mfarity, :call_time),
+              :trace.info(state.session, mfarity, :call_memory)
+            ]
+            |> Map.new()
 
           {mfarity, info}
         end)
@@ -383,12 +380,6 @@ defmodule Entrace do
   end
 
   defp set_trace_pattern(mfa, transmission, opts, state) do
-    if TracePatterns.count(state.trace_patterns) == 0 do
-      Logger.debug("Enabling tracing...")
-      processes = on(self())
-      Logger.debug("Matched #{processes} existing processes")
-    end
-
     limit =
       if opts[:time_limit] do
         # Send a message for clearing the trace pattern after the time limit
@@ -405,9 +396,9 @@ defmodule Entrace do
     {result, trace_patterns} =
       if TracePatterns.exists?(state.trace_patterns, mfa) do
         Logger.debug("Clearing existing trace pattern: #{inspect(mfa)}")
-        clear_pattern(mfa)
+        clear_pattern(state.session, mfa)
         Logger.debug("Resetting trace pattern: #{inspect(mfa)}")
-        functions = set_pattern(mfa)
+        functions = set_pattern(state.session, mfa)
         Logger.debug("Matched #{functions} functions")
         tps = TracePatterns.add(state.trace_patterns, mfa, trace_pattern)
         {{:ok, {:reset_existing, functions}}, tps}
@@ -415,7 +406,7 @@ defmodule Entrace do
         case TracePatterns.covered_by(state.trace_patterns, mfa) do
           nil ->
             Logger.debug("Setting trace pattern: #{inspect(mfa)}")
-            functions = set_pattern(mfa)
+            functions = set_pattern(state.session, mfa)
             Logger.debug("Matched #{functions} functions")
             tps = TracePatterns.add(state.trace_patterns, mfa, trace_pattern)
             {{:ok, {:set, functions}}, tps}
@@ -444,47 +435,25 @@ defmodule Entrace do
     send(pid, {:trace, trace})
   end
 
-  defp on(pid) do
-    :erlang.trace(:all, true, [:call, :timestamp, {:tracer, pid}])
-    # :erlang.trace(:all, true, [:call, {:tracer, pid}])
+  @pattern_opts [:local, :call_count, :call_time, :call_memory]
+
+  defp set_pattern(session, mfa) do
+    :trace.function(session, mfa, match_spec(), @pattern_opts)
   end
 
-  defp off(pid) do
-    :erlang.trace(:all, false, [:call, :timestamp, {:tracer, pid}])
-    # :erlang.trace(:all, false, [:call, {:tracer, pid}])
-  end
-
-  @pattern_opts (if @otp_version >= 26 do
-                   [:local, :call_count, :call_time, :call_memory]
-                 else
-                   [:local, :call_count, :call_time]
-                 end)
-  defp set_pattern(mfa) do
-    :erlang.trace_pattern(mfa, match_spec(), @pattern_opts)
-  end
-
-  defp clear_pattern(mfa) do
+  defp clear_pattern(session, mfa) do
     Logger.debug("Clearing pattern #{inspect(mfa)}")
-    :erlang.trace_pattern(mfa, false, @pattern_opts)
+    :trace.function(session, mfa, false, @pattern_opts)
   end
 
   # These are from https://www.erlang.org/doc/apps/erts/match_spec
   # We use ex2ms here to do these
   defp match_spec() do
-    if @otp_version >= 26 do
-      fun do
-        _ ->
-          message([current_stacktrace(), caller(), caller_line()])
-          # Note: Exception implies return_trace() as well
-          exception_trace()
-      end
-    else
-      fun do
-        _ ->
-          message([caller()])
-          # Note: Exception implies return_trace() as well
-          exception_trace()
-      end
+    fun do
+      _ ->
+        message([current_stacktrace(), caller(), caller_line()])
+        # Note: Exception implies return_trace() as well
+        exception_trace()
     end
   end
 
