@@ -1,0 +1,64 @@
+name: Build precompiled BEAMs
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach artifacts to (leave empty for build-only test)"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: OTP ${{ matrix.otp }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        include:
+          - otp: "27"
+            elixir: "1.17"
+          # Add new OTP versions here as they release
+          # - otp: "28"
+          #   elixir: "1.18"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ matrix.otp }}
+          elixir-version: ${{ matrix.elixir }}
+
+      - name: Install dependencies
+        run: mix deps.get --only prod
+
+      - name: Compile
+        run: MIX_ENV=prod mix compile
+
+      - name: Strip compile-only deps from .app
+        run: elixir script/fix_app_file.exs _build/prod/lib/entrace/ebin/entrace.app
+
+      - name: Package .beam files
+        run: |
+          tar czf entrace-otp-${{ matrix.otp }}.tar.gz \
+            -C _build/prod/lib/entrace/ebin .
+
+      - name: Upload build artifact
+        if: ${{ !github.event.release.tag_name && !github.event.inputs.tag }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: entrace-otp-${{ matrix.otp }}
+          path: entrace-otp-${{ matrix.otp }}.tar.gz
+
+      - name: Upload to release
+        if: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ github.event.release.tag_name || github.event.inputs.tag }}"
+          gh release upload "$tag" entrace-otp-${{ matrix.otp }}.tar.gz --clobber

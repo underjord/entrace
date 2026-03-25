@@ -21,6 +21,22 @@ Entrace.Mini.stop(pid)
 
 It supports wildcard patterns (`{MyApp.SomeModule, :_, :_}`), custom limits (`limit: 500`), and loading onto remote nodes (`Entrace.Mini.load_on(:"node@host")`).
 
+## Quick: load pre-compiled into a running system
+
+For the full library without mix, copy [`Entrace.Install`](https://github.com/underjord/entrace/blob/main/extras/install.ex) and paste it into IEx. It downloads pre-compiled `.beam` files matching your OTP version from GitHub releases:
+
+```elixir
+# Paste the module, then:
+Entrace.Install.run()
+
+# Now use the full library:
+{:ok, pid} = Entrace.start_link()
+Entrace.trace(pid, {MyApp.SomeModule, :some_function, 2}, self())
+
+# Push to cluster nodes:
+Entrace.Install.load_on(:"other@node")
+```
+
 ## Installation
 
 To install, add it to `mix.exs` under the `deps`:
