@@ -1,13 +1,9 @@
 defmodule Entrace.Cluster do
   require Logger
-  # Taken from Phoenix.PubSub tests
+
   def spawn(nodes) do
     # Turn node into a distributed node with the given long name
     :net_kernel.start([:"primary@127.0.0.1"])
-
-    # Allow spawned nodes to fetch all code from this node
-    :erl_boot_server.start([])
-    allow_boot(to_charlist("127.0.0.1"))
 
     nodes
     |> Enum.map(&Task.async(fn -> spawn_node(&1) end))
@@ -31,7 +27,15 @@ defmodule Entrace.Cluster do
   end
 
   defp spawn_node(node_host) do
-    {:ok, node} = :slave.start(to_charlist("127.0.0.1"), node_name(node_host), inet_loader_args())
+    name = node_name(node_host)
+
+    {:ok, _pid, node} =
+      :peer.start(%{
+        name: name,
+        host: ~c"127.0.0.1",
+        args: [~c"-setcookie", to_charlist(:erlang.get_cookie())]
+      })
+
     add_code_paths(node)
     transfer_configuration(node)
     ensure_applications_started(node)
@@ -40,15 +44,6 @@ defmodule Entrace.Cluster do
 
   defp rpc(node, module, function, args) do
     :rpc.block_call(node, module, function, args)
-  end
-
-  defp inet_loader_args do
-    to_charlist("-loader inet -hosts 127.0.0.1 -setcookie #{:erlang.get_cookie()}")
-  end
-
-  defp allow_boot(host) do
-    {:ok, ipv4} = :inet.parse_ipv4_address(host)
-    :erl_boot_server.add_slave(ipv4)
   end
 
   defp add_code_paths(node) do

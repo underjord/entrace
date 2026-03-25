@@ -2,7 +2,10 @@ defmodule Entrace.Tracer do
   defmacro __using__(opts) do
     quote bind_quoted: [opts: opts] do
       def child_spec(opts) do
-        opts = Keyword.put(opts, :name, __MODULE__)
+        opts =
+          opts
+          |> Keyword.put(:name, __MODULE__)
+          |> Keyword.put_new(:session_prefix, __MODULE__)
 
         %{
           id: Entrace,

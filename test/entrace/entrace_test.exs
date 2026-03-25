@@ -5,7 +5,6 @@ defmodule Entrace.EntraceTest do
   use ExUnit.Case, async: false
 
   alias Entrace.Trace
-  @otp_version String.to_integer(System.otp_release())
 
   describe "basic" do
     defmodule Sample do
@@ -66,45 +65,26 @@ defmodule Entrace.EntraceTest do
 
       infos = Entrace.list_trace_info(pid)
 
-      if @otp_version >= 26 do
-        assert %{
-                 {Entrace.EntraceTest.Sample, :a, 0} => %{
-                   call_count: 3,
-                   # ordering becomes arbitrary
-                   call_memory: [{_, _, _}, {_, _, _}],
-                   # ordering becomes arbitrary
-                   call_time: [{_, _, _, _}, {_, _, _, _}]
-                 },
-                 {Entrace.EntraceTest.Sample, :b, 0} => %{
-                   call_count: 1,
-                   call_memory: [{_pid3, 1, _n3}],
-                   call_time: [{_pid4, 1, 0, _n4}]
-                 },
-                 {Entrace.EntraceTest.Sample, :hold, 1} => %{
-                   call_count: 1,
-                   call_memory: [{_pid5, 1, _n5}],
-                   # This is weirdly sometimes 8 instead of up towards 40
-                   call_time: [{_pid6, 1, 0, _took}]
-                 }
-               } = infos
-      else
-        assert %{
-                 {Entrace.EntraceTest.Sample, :a, 0} => %{
-                   call_count: 3,
-                   # ordering becomes arbitrary
-                   call_time: [{_, _, _, _}, {_, _, _, _}]
-                 },
-                 {Entrace.EntraceTest.Sample, :b, 0} => %{
-                   call_count: 1,
-                   call_time: [{_pid4, 1, 0, _n4}]
-                 },
-                 {Entrace.EntraceTest.Sample, :hold, 1} => %{
-                   call_count: 1,
-                   # This is weirdly sometimes 8 instead of up towards 40
-                   call_time: [{_pid6, 1, 0, _took}]
-                 }
-               } = infos
-      end
+      assert %{
+               {Entrace.EntraceTest.Sample, :a, 0} => %{
+                 call_count: 3,
+                 # ordering becomes arbitrary
+                 call_memory: [{_, _, _}, {_, _, _}],
+                 # ordering becomes arbitrary
+                 call_time: [{_, _, _, _}, {_, _, _, _}]
+               },
+               {Entrace.EntraceTest.Sample, :b, 0} => %{
+                 call_count: 1,
+                 call_memory: [{_pid3, 1, _n3}],
+                 call_time: [{_pid4, 1, 0, _n4}]
+               },
+               {Entrace.EntraceTest.Sample, :hold, 1} => %{
+                 call_count: 1,
+                 call_memory: [{_pid5, 1, _n5}],
+                 # This is weirdly sometimes 8 instead of up towards 40
+                 call_time: [{_pid6, 1, 0, _took}]
+               }
+             } = infos
 
       # Flaky, disabling
       # assert took >= 10
@@ -123,15 +103,11 @@ defmodule Entrace.EntraceTest do
 
       assert :ok = Sample.a()
       assert :ok = Sample.b()
-      ref = :erlang.trace_delivered(base)
 
-      receive do
-        {:trace_delivered, ^base, ^ref} ->
-          assert_receive {:trace, %Trace{mfa: {Sample, :a, []}, return_value: nil}}
-          assert_receive {:trace, %Trace{mfa: {Sample, :a, []}, return_value: {:return, :ok}}}
-          assert_receive {:trace, %Trace{mfa: {Sample, :b, []}, return_value: nil}}
-          assert_receive {:trace, %Trace{mfa: {Sample, :b, []}, return_value: {:return, :ok}}}
-      end
+      assert_receive {:trace, %Trace{mfa: {Sample, :a, []}, return_value: nil}}
+      assert_receive {:trace, %Trace{mfa: {Sample, :a, []}, return_value: {:return, :ok}}}
+      assert_receive {:trace, %Trace{mfa: {Sample, :b, []}, return_value: nil}}
+      assert_receive {:trace, %Trace{mfa: {Sample, :b, []}, return_value: {:return, :ok}}}
     end
 
     test "two parallel traces", %{pid: pid} do
