@@ -23,18 +23,17 @@ It supports wildcard patterns (`{MyApp.SomeModule, :_, :_}`), custom limits (`li
 
 ## Quick: load pre-compiled into a running system
 
-For the full library without mix, copy [`Entrace.Install`](https://github.com/underjord/entrace/blob/main/extras/install.ex) and paste it into IEx. It downloads pre-compiled `.beam` files matching your OTP version from GitHub releases:
+Paste this one-liner into IEx to download and start the full Entrace library. It fetches pre-compiled `.beam` files matching your OTP version from GitHub releases:
 
 ```elixir
-# Paste the module, then:
-Entrace.Install.run()
+(fn -> :inets.start(); :ssl.start(); otp = System.otp_release(); {:ok, {{_, 200, _}, _, body}} = :httpc.request(:get, {~c"https://github.com/underjord/entrace/releases/latest/download/entrace-otp-#{otp}.tar.gz", []}, [ssl: [verify: :verify_peer, cacerts: :public_key.cacerts_get(), depth: 3, customize_hostname_check: [match_fun: :public_key.pkix_verify_hostname_match_fun(:https)]]], body_format: :binary); dir = Path.join(System.tmp_dir!(), "entrace"); File.rm_rf!(dir); File.mkdir_p!(dir); :ok = :erl_tar.extract({:binary, body}, [:compressed, {:cwd, to_charlist(dir)}]); Code.prepend_path(dir); Application.ensure_all_started(:entrace) end).()
+```
 
-# Now use the full library:
+Then use the full library:
+
+```elixir
 {:ok, pid} = Entrace.start_link()
 Entrace.trace(pid, {MyApp.SomeModule, :some_function, 2}, self())
-
-# Push to cluster nodes:
-Entrace.Install.load_on(:"other@node")
 ```
 
 ## Installation
