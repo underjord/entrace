@@ -58,11 +58,14 @@ defmodule Entrace.Cluster do
     end
   end
 
+  @skip_apps [:dialyxir, :credo, :spellweaver, :bun, :ex_doc, :igniter, :nstandard]
+
   defp ensure_applications_started(node) do
     rpc(node, Application, :ensure_all_started, [:mix])
     rpc(node, Mix, :env, [Mix.env()])
 
-    for {app_name, _, _} <- Application.loaded_applications() do
+    for {app_name, _, _} <- Application.loaded_applications(),
+        app_name not in @skip_apps do
       rpc(node, Application, :ensure_all_started, [app_name])
     end
   end
