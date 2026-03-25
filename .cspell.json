@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/streetsidesoftware/cspell/main/cspell.schema.json",
+  "version": "0.2",
+  "language": "en",
+  "useGitignore": true,
+  "dictionaryDefinitions": [
+    {
+      "name": "fhunleth-cspell-dictionary",
+      "path": "https://raw.githubusercontent.com/fhunleth/fhunleth-cspell-dictionary/refs/heads/main/words.txt",
+      "addWords": false
+    }
+  ],
+  "dictionaries": [
+    "elixir",
+    "en-gb",
+    "fhunleth-cspell-dictionary"
+  ],
+  "ignorePaths": [
+    "deps",
+    "_build",
+    "assets",
+    "mix.exs",
+    "priv",
+    "test"
+  ],
+  "words": []
+}
