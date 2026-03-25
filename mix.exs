@@ -4,7 +4,7 @@ defmodule Entrace.MixProject do
   def project do
     [
       app: :entrace,
-      version: "0.2.0-rc1",
+      version: "0.2.0-rc2",
       elixir: "~> 1.17",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,

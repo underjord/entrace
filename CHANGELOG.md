@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.2.0-rc1
+## v0.2.0-rc2
 
 - Add experimental install support. For installing as pre-built BEAM files into a running system.
 - Add Entrace.Mini, installable convenience version the library that is one pasteable module.

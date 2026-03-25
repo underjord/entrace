@@ -28,6 +28,8 @@
     "mfarity",
     "mfarguments",
     "backhaul",
-    "megaseconds"
+    "megaseconds",
+    "nstandard",
+    "pasteable"
   ]
 }
