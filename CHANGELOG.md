@@ -1,9 +1,15 @@
 # Changelog
 
-## v0.2.0-rc2
+## v0.2.0
 
-- Add experimental install support. For installing as pre-built BEAM files into a running system.
-- Add Entrace.Mini, installable convenience version the library that is one pasteable module.
+You never have this library installed when you need it. So let's fix that.
+
+- Add experimental install support. For installing as pre-built BEAM files into a running system with a one-liner.
+- Add Entrace.Mini, installable convenience version of the library that is one pasteable module.
+
+This will also spread into your cluster
+
+Obviously use at your own risk as your are installing a random chunk of code across your cluster.
 
 ## v0.1.1
 
