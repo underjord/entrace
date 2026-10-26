@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.2.1
+
+Bump dependencies and add more releases to the matrix to expand the pre-built support.
+
 ## v0.2.0
 
 You never have this library installed when you need it. So let's fix that.
