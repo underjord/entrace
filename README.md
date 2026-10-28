@@ -26,8 +26,10 @@ It supports wildcard patterns (`{MyApp.SomeModule, :_, :_}`), custom limits (`li
 Paste this one-liner into IEx to download and start the full Entrace library. It fetches pre-compiled `.beam` files matching your OTP version from GitHub releases:
 
 ```elixir
-(fn -> :inets.start(); :ssl.start(); otp = System.otp_release(); {:ok, {{_, 200, _}, _, body}} = :httpc.request(:get, {~c"https://github.com/underjord/entrace/releases/latest/download/entrace-otp-#{otp}.tar.gz", []}, [ssl: [verify: :verify_peer, cacerts: :public_key.cacerts_get(), depth: 3, customize_hostname_check: [match_fun: :public_key.pkix_verify_hostname_match_fun(:https)]]], body_format: :binary); dir = Path.join(System.tmp_dir!(), "entrace"); File.rm_rf!(dir); File.mkdir_p!(dir); :ok = :erl_tar.extract({:binary, body}, [:compressed, {:cwd, to_charlist(dir)}]); Code.prepend_path(dir); Application.ensure_all_started(:entrace) end).()
+(fn -> :inets.start(); :ssl.start(); otp = System.otp_release(); {:ok, {{_, 200, _}, _, body}} = :httpc.request(:get, {~c"https://github.com/underjord/entrace/releases/latest/download/entrace-otp-#{otp}.tar.gz", []}, [ssl: [verify: :verify_peer, cacerts: :public_key.cacerts_get(), depth: 3, customize_hostname_check: [match_fun: :public_key.pkix_verify_hostname_match_fun(:https)]]], body_format: :binary); dir = Path.join(System.tmp_dir!(), "entrace"); File.rm_rf!(dir); File.mkdir_p!(dir); :ok = :erl_tar.extract({:binary, body}, [:compressed, {:cwd, to_charlist(dir)}]); Code.prepend_path(dir); for beam <- Path.wildcard(Path.join(dir, "*.beam")), do: {:module, _} = :code.load_abs(to_charlist(Path.rootname(beam))); Application.ensure_all_started(:entrace) end).()
 ```
+
+The beams are loaded explicitly because a Mix release runs in embedded code-loading mode by default, where modules on the code path are not loaded on demand. Without that step `Application.ensure_all_started(:entrace)` finds the app but fails with `:undef` on `Entrace.Application.start/2`.
 
 Then use the full library:
 
