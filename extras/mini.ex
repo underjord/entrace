@@ -107,6 +107,19 @@ defmodule Entrace.Mini do
         send(target, {:trace, msg})
         loop(session, target, limit, count + 1)
 
+      {:trace_ts, from, :exception_from, mfa, {class, reason}, ts} ->
+        msg = %{
+          event: :exception,
+          mfa: mfa,
+          class: class,
+          reason: reason,
+          pid: from,
+          at: format_ts(ts)
+        }
+
+        send(target, {:trace, msg})
+        loop(session, target, limit, count + 1)
+
       :stop ->
         :trace.session_destroy(session)
 

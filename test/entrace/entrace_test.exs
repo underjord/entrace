@@ -15,6 +15,7 @@ defmodule Entrace.EntraceTest do
 
       def a, do: :ok
       def b, do: :ok
+      def boom, do: raise("boom")
     end
 
     setup do
@@ -42,6 +43,23 @@ defmodule Entrace.EntraceTest do
                       }}
 
       assert_receive {:trace, %Trace{mfa: {Sample, :a, []}, return_value: {:return, :ok}}}
+    end
+
+    test "trace a call that raises", %{pid: pid} do
+      mfa = {Sample, :boom, 0}
+
+      assert {:ok, {:set, 1}} = Entrace.trace(pid, mfa, self())
+
+      assert_raise RuntimeError, fn -> Sample.boom() end
+
+      assert_receive {:trace, %Trace{mfa: {Sample, :boom, []}, return_value: nil}}
+
+      assert_receive {:trace,
+                      %Trace{
+                        mfa: {Sample, :boom, []},
+                        returned_at: %DateTime{},
+                        return_value: {:exception, {:error, %RuntimeError{message: "boom"}}}
+                      }}
     end
 
     test "trace with info", %{pid: pid} do

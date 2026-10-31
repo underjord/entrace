@@ -137,6 +137,33 @@ defmodule Entrace.TraceWorker do
     end
   end
 
+  def handle_info({:trace_ts, from_pid, :exception_from, mfa, exception, ts}, state) do
+    Logger.debug("Receiving exception_from event from #{inspect(from_pid)} for #{inspect(mfa)}.")
+    datetime = ts_to_dt!(ts)
+    key = {from_pid, mfa}
+
+    {trace, unmatched} = Map.pop(state.unmatched_traces, key)
+    state = %{state | unmatched_traces: unmatched}
+
+    if trace do
+      trace = Trace.with_exception(trace, mfa, from_pid, datetime, exception)
+      transmit(state.transmission, trace)
+    end
+
+    if state.msg_count < state.limit do
+      hit_count = Map.get(state.hit_mfas, mfa, 0)
+
+      {:noreply,
+       %{
+         state
+         | msg_count: state.msg_count + 1,
+           hit_mfas: Map.put(state.hit_mfas, mfa, hit_count + 1)
+       }}
+    else
+      {:stop, :normal, state}
+    end
+  end
+
   def handle_info(:time_limit_reached, state) do
     Logger.debug("Time limit hit, stopping trace worker for #{inspect(state.mfa)}")
     {:stop, :normal, state}

@@ -6,6 +6,7 @@ defmodule Entrace.MiniTest do
   defmodule Sample do
     def add(a, b), do: a + b
     def hello, do: :world
+    def boom, do: raise("boom")
   end
 
   describe "trace/2" do
@@ -18,6 +19,26 @@ defmodule Entrace.MiniTest do
 
         assert_receive {:trace, %{event: :call, mfa: {Sample, :add, 2}, args: [1, 2]}}
         assert_receive {:trace, %{event: :return, mfa: {Sample, :add, 2}, return: 3}}
+
+        Entrace.Mini.stop(pid)
+      end)
+    end
+
+    test "traces a function call that raises" do
+      capture_io(fn ->
+        pid = Entrace.Mini.trace({Sample, :boom, 0})
+
+        assert_raise RuntimeError, fn -> Sample.boom() end
+
+        assert_receive {:trace, %{event: :call, mfa: {Sample, :boom, 0}}}
+
+        assert_receive {:trace,
+                        %{
+                          event: :exception,
+                          mfa: {Sample, :boom, 0},
+                          class: :error,
+                          reason: %RuntimeError{message: "boom"}
+                        }}
 
         Entrace.Mini.stop(pid)
       end)

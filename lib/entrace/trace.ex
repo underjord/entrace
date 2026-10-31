@@ -19,7 +19,7 @@ defmodule Entrace.Trace do
           pid: pid(),
           called_at: DateTime.t(),
           returned_at: DateTime.t() | nil,
-          return_value: nil | :too_large | {:return, term()}
+          return_value: nil | :too_large | {:return, term()} | {:exception, term()}
         }
 
   @spec new(integer(), {atom(), atom(), list()}, pid(), DateTime.t()) :: t()
@@ -53,5 +53,18 @@ defmodule Entrace.Trace do
       )
       when length(args) == arity do
     %{trace | returned_at: returned_at, return_value: {:return, return_value}}
+  end
+
+  @spec with_exception(t(), {atom(), atom(), non_neg_integer()}, pid(), DateTime.t(), term()) ::
+          t()
+  def with_exception(
+        %Trace{mfa: {m, f, args}, pid: pid} = trace,
+        {m, f, arity},
+        pid,
+        %DateTime{} = returned_at,
+        exception
+      )
+      when length(args) == arity do
+    %{trace | returned_at: returned_at, return_value: {:exception, exception}}
   end
 end
