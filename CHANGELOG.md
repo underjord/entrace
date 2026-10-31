@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.2
+
+- Improve quick install
+- Handle exceptions in traced functions
+
 ## v0.2.1
 
 Bump dependencies and add more releases to the matrix to expand the pre-built support.
