@@ -30,6 +30,7 @@
     "backhaul",
     "megaseconds",
     "nstandard",
-    "pasteable"
+    "pasteable",
+    "rootname"
   ]
 }
